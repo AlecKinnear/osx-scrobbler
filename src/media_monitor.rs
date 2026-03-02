@@ -9,7 +9,6 @@ use chrono::{DateTime, Utc};
 use media_remote::prelude::*;
 use media_remote::NowPlayingInfo;
 use std::time::Duration;
-use std::time::SystemTime;
 
 const MIN_TRACK_DURATION: u64 = 30; // Minimum track duration in seconds to scrobble
 const SCROBBLE_TIME_THRESHOLD: u64 = 240; // 4 minutes in seconds
@@ -31,7 +30,6 @@ struct PlaySession {
     duration: u64, // Track duration in seconds
     scrobbled: bool,
     now_playing_sent: bool,
-    info_update_time: Option<SystemTime>,
 }
 
 impl PlaySession {
@@ -39,7 +37,6 @@ impl PlaySession {
         track: Track,
         bundle_id: Option<String>,
         duration: u64,
-        info_update_time: Option<SystemTime>,
     ) -> Self {
         Self {
             track,
@@ -48,7 +45,6 @@ impl PlaySession {
             duration,
             scrobbled: false,
             now_playing_sent: false,
-            info_update_time,
         }
     }
 
@@ -211,8 +207,8 @@ impl MediaMonitor {
                 let is_new_track = match &self.current_session {
                     None => true,
                     Some(session) => {
-                        // Check if track changed
-                        session.track != track || session.info_update_time != info.info_update_time
+                        // Check if track changed (only compare track metadata, not update time)
+                        session.track != track
                     }
                 };
 
@@ -230,7 +226,6 @@ impl MediaMonitor {
                         track.clone(),
                         bundle_id.clone(),
                         duration,
-                        info.info_update_time,
                     );
                     new_session.now_playing_sent = true; // Mark as sent immediately
                     self.current_session = Some(new_session);

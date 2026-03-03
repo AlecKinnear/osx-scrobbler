@@ -69,6 +69,7 @@ pub struct TrayManager {
     #[allow(dead_code)]
     menu: Menu,
     now_playing_item: MenuItem,
+    love_item: MenuItem,
     last_scrobble_item: MenuItem,
     pub quit_item: MenuItem,
 }
@@ -80,6 +81,7 @@ impl TrayManager {
 
         // Create menu items
         let now_playing_item = MenuItem::new("Now Playing: None", false, None);
+        let love_item = MenuItem::new("🖤 Love", false, None);
         let last_scrobble_item = MenuItem::new("Last Scrobbled: None", false, None);
         let separator = PredefinedMenuItem::separator();
         let quit_item = MenuItem::new("Quit", true, None);
@@ -88,6 +90,7 @@ impl TrayManager {
         let menu = Menu::new();
         menu.append(&now_playing_item)
             .context("Failed to add now playing item")?;
+        menu.append(&love_item).context("Failed to add love item")?;
         menu.append(&last_scrobble_item)
             .context("Failed to add last scrobble item")?;
         menu.append(&separator).context("Failed to add separator")?;
@@ -110,9 +113,31 @@ impl TrayManager {
             state,
             menu,
             now_playing_item,
+            love_item,
             last_scrobble_item,
             quit_item,
         })
+    }
+
+    /// Get the love item ID for event handling
+    pub fn love_item_id(&self) -> tray_icon::menu::MenuId {
+        self.love_item.id().clone()
+    }
+
+    /// Get the currently playing track
+    pub fn current_track(&self) -> Option<String> {
+        self.state.now_playing.clone()
+    }
+
+    /// Update love button status
+    pub fn update_love_status(&mut self, is_loved: bool) -> Result<()> {
+        let text = if is_loved {
+            "♥ Loved"
+        } else {
+            "🖤 Love"
+        };
+        self.love_item.set_text(text);
+        Ok(())
     }
 
     /// Update the now playing display
@@ -124,7 +149,11 @@ impl TrayManager {
         };
 
         self.now_playing_item.set_text(text);
-        self.state.now_playing = track;
+        self.state.now_playing = track.clone();
+
+        // Enable/disable love button based on whether there's a track
+        let is_track_playing = track.is_some();
+        self.love_item.set_enabled(is_track_playing);
 
         Ok(())
     }

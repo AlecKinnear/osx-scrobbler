@@ -92,7 +92,12 @@ pub struct Track {
 /// Scrobbling service
 pub enum Service {
     LastFm(LastFmScrobbler),
-    ListenBrainz { name: String, client: ListenBrainz },
+    ListenBrainz {
+        name: String,
+        client: ListenBrainz,
+        token: String,
+        api_url: String,
+    },
 }
 
 impl Service {
@@ -115,7 +120,12 @@ impl Service {
             .authenticate(&token)
             .with_context(|| format!("Failed to authenticate with ListenBrainz ({})", name))?;
 
-        Ok(Self::ListenBrainz { name, client })
+        Ok(Self::ListenBrainz {
+            name,
+            client,
+            token,
+            api_url,
+        })
     }
 
     /// Submit a "now playing" update
@@ -128,13 +138,100 @@ impl Service {
                     .context("Failed to update now playing on Last.fm")?;
                 log::info!("Last.fm: Now playing updated");
             }
-            Self::ListenBrainz { name, client } => {
+            Self::ListenBrainz {
+                name,
+                client,
+                token: _,
+                api_url: _,
+            } => {
                 client
                     .playing_now(&track.artist, &track.title, track.album.as_deref())
                     .with_context(|| {
                         format!("Failed to update now playing on ListenBrainz ({})", name)
                     })?;
                 log::info!("ListenBrainz ({}): Now playing updated", name);
+            }
+        }
+        Ok(())
+    }
+
+    /// Check if a track is loved on Last.fm
+    pub fn is_loved(&self, track: &Track, api_key: &str, api_secret: &str, session_key: &str) -> Result<bool> {
+        match self {
+            Self::LastFm(_) => {
+                // Call Last.fm track.getInfo API with username parameter
+                let sig_string = format!(
+                    "api_key{}artist{}methodtrack.getInfosk{}track{}{}",
+                    api_key, &track.artist, session_key, &track.title, api_secret
+                );
+                let signature = format!("{:x}", md5::compute(sig_string.as_bytes()));
+
+                let body = format!(
+                    "method=track.getInfo&api_key={}&artist={}&track={}&sk={}&api_sig={}",
+                    api_key, &track.artist, &track.title, session_key, signature
+                );
+
+                let response = attohttpc::post("https://ws.audioscrobbler.com/2.0/")
+                    .header("Content-Type", "application/x-www-form-urlencoded")
+                    .text(body)
+                    .send()
+                    .context("Failed to get track info from Last.fm")?;
+
+                if !response.is_success() {
+                    log::warn!("Last.fm API error: {}", response.status());
+                    return Ok(false);
+                }
+
+                let response_text = response.text().unwrap_or_default();
+                // Check if the response contains <userloved>1</userloved>
+                Ok(response_text.contains("<userloved>1</userloved>"))
+            }
+            Self::ListenBrainz { .. } => {
+                // ListenBrainz doesn't provide loved status, assume not loved
+                Ok(false)
+            }
+        }
+    }
+
+    /// Love a track on Last.fm and ListenBrainz
+    pub fn love(&self, track: &Track, api_key: &str, api_secret: &str, session_key: &str) -> Result<()> {
+        match self {
+            Self::LastFm(_) => {
+                // Call Last.fm track.love API directly
+                // Build signature: api_key, artist, method, sk, track, api_secret (in alphabetical order)
+                let sig_string = format!(
+                    "api_key{}artist{}methodtrack.lovesk{}track{}{}",
+                    api_key, &track.artist, session_key, &track.title, api_secret
+                );
+                let signature = format!("{:x}", md5::compute(sig_string.as_bytes()));
+
+                let body = format!(
+                    "method=track.love&api_key={}&artist={}&track={}&sk={}&api_sig={}",
+                    api_key, &track.artist, &track.title, session_key, signature
+                );
+
+                let response = attohttpc::post("https://ws.audioscrobbler.com/2.0/")
+                    .header("Content-Type", "application/x-www-form-urlencoded")
+                    .text(body)
+                    .send()
+                    .context("Failed to send love request to Last.fm")?;
+
+                if !response.is_success() {
+                    anyhow::bail!("Last.fm API error: {}", response.status());
+                }
+
+                log::info!("Last.fm: Track loved");
+            }
+            Self::ListenBrainz {
+                name,
+                client: _,
+                token: _,
+                api_url: _,
+            } => {
+                // ListenBrainz doesn't have a public love/feedback API in the crate,
+                // but we could implement it via the raw API if needed
+                // For now, just log that it's not supported
+                log::info!("ListenBrainz ({}): Love/feedback not yet implemented", name);
             }
         }
         Ok(())
@@ -152,12 +249,41 @@ impl Service {
                     .context("Failed to scrobble to Last.fm")?;
                 log::info!("Last.fm: Scrobbled successfully");
             }
-            Self::ListenBrainz { name, client } => {
-                // ListenBrainz uses current time for .listen(), so we use import() for historical timestamps
-                // But for recent scrobbles we can just use listen()
-                client
-                    .listen(&track.artist, &track.title, track.album.as_deref())
-                    .with_context(|| format!("Failed to scrobble to ListenBrainz ({})", name))?;
+            Self::ListenBrainz {
+                name,
+                client: _,
+                token,
+                api_url,
+            } => {
+                // Submit with current timestamp (same day is enough)
+                use serde_json::json;
+
+                let payload = json!({
+                    "listen_type": "single",
+                    "payload": [{
+                        "listened_at": Utc::now().timestamp(),
+                        "track_metadata": {
+                            "artist_name": track.artist,
+                            "track_name": track.title,
+                            "release_name": track.album,
+                        }
+                    }]
+                });
+
+                let response = attohttpc::post(format!("{}/1/submit-listens", api_url))
+                    .header("Authorization", format!("Token {}", token))
+                    .header("Content-Type", "application/json")
+                    .text(serde_json::to_string(&payload)?)
+                    .send()
+                    .with_context(|| format!("Failed to submit listen to ListenBrainz ({})", name))?;
+
+                if !response.is_success() {
+                    anyhow::bail!(
+                        "ListenBrainz API error {}: {}",
+                        response.status(),
+                        response.text().unwrap_or_default()
+                    );
+                }
                 log::info!("ListenBrainz ({}): Scrobbled successfully", name);
             }
         }

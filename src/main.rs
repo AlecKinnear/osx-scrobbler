@@ -141,6 +141,7 @@ fn main() -> Result<()> {
     #[derive(Debug, Clone, Copy)]
     enum UserEvent {
         TrayQuit,
+        TrayLove,
     }
 
     // Run event loop on main thread for tray icon
@@ -154,6 +155,7 @@ fn main() -> Result<()> {
     // Spawn minimal thread to forward tray menu events to main event loop
     // This allows event-based wakeup instead of polling
     let quit_item_id = tray.quit_item.id().clone();
+    let love_item_id = tray.love_item_id();
     std::thread::spawn(move || {
         use tray_icon::menu::MenuEvent;
         loop {
@@ -161,6 +163,9 @@ fn main() -> Result<()> {
                 if event.id == quit_item_id {
                     log::info!("Quit menu item clicked");
                     let _ = event_proxy.send_event(UserEvent::TrayQuit);
+                } else if event.id == love_item_id {
+                    log::info!("Love menu item clicked");
+                    let _ = event_proxy.send_event(UserEvent::TrayLove);
                 }
             }
         }
@@ -180,10 +185,49 @@ fn main() -> Result<()> {
     #[allow(deprecated)]
     event_loop.run(move |event, elwt| {
         // Handle user events (tray menu actions)
-        if let winit::event::Event::UserEvent(UserEvent::TrayQuit) = event {
-            log::info!("OSX Scrobbler shutting down");
-            elwt.exit();
-            return;
+        match event {
+            winit::event::Event::UserEvent(UserEvent::TrayQuit) => {
+                log::info!("OSX Scrobbler shutting down");
+                elwt.exit();
+                return;
+            }
+            winit::event::Event::UserEvent(UserEvent::TrayLove) => {
+                // Love the currently playing track
+                if let Some(track_str) = tray.current_track() {
+                    // Parse "Artist - Title" format to extract track info
+                    if let Some(pos) = track_str.find(" - ") {
+                        let artist = track_str[..pos].to_string();
+                        let title = track_str[pos + 3..].to_string();
+                        let track = scrobbler::Track {
+                            title,
+                            artist,
+                            album: None,
+                            duration: None,
+                        };
+
+                        // Get Last.fm credentials for loving
+                        if let Some(ref lastfm_config) = config.lastfm {
+                            for scrobbler in &scrobblers {
+                                match scrobbler.love(
+                                    &track,
+                                    &lastfm_config.api_key,
+                                    &lastfm_config.api_secret,
+                                    &lastfm_config.session_key,
+                                ) {
+                                    Ok(_) => log::info!("Track loved successfully"),
+                                    Err(e) => log::error!("Failed to love track: {}", e),
+                                }
+                            }
+                        } else {
+                            log::warn!("Last.fm not configured, cannot love track");
+                        }
+                    }
+                } else {
+                    log::warn!("No track currently playing to love");
+                }
+                return;
+            }
+            _ => {}
         }
 
         let now = Instant::now();
@@ -227,6 +271,41 @@ fn main() -> Result<()> {
                         let track_str = format!("{} - {}", track.artist, track.title);
                         if let Err(e) = tray.update_now_playing(Some(track_str)) {
                             log::error!("Failed to update tray now playing: {}", e);
+                        }
+
+                        // Check if track is loved on Last.fm
+                        if let Some(ref lastfm_config) = config.lastfm {
+                            if !lastfm_config.session_key.is_empty() {
+                                // Find the Last.fm scrobbler
+                                if let Some(lastfm_scrobbler) = scrobblers.iter().find(|s| {
+                                    matches!(s, Service::LastFm(_))
+                                }) {
+                                    match lastfm_scrobbler.is_loved(
+                                        track,
+                                        &lastfm_config.api_key,
+                                        &lastfm_config.api_secret,
+                                        &lastfm_config.session_key,
+                                    ) {
+                                        Ok(is_loved) => {
+                                            if let Err(e) = tray.update_love_status(is_loved) {
+                                                log::error!("Failed to update love status: {}", e);
+                                            }
+                                        }
+                                        Err(e) => {
+                                            log::warn!("Failed to check if track is loved: {}", e);
+                                            // Default to unloved if we can't check
+                                            if let Err(e) = tray.update_love_status(false) {
+                                                log::error!("Failed to update love status: {}", e);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            // Reset to unloved if Last.fm not configured
+                            if let Err(e) = tray.update_love_status(false) {
+                                log::error!("Failed to update love status: {}", e);
+                            }
                         }
                     }
 

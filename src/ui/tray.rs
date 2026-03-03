@@ -150,6 +150,7 @@ impl TrayManager {
     }
 
     /// Update the album art URL for the currently playing track
+    #[allow(dead_code)]
     pub fn update_album_art(&mut self, url: Option<String>) {
         self.state.album_art_url = url;
     }

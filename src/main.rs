@@ -266,7 +266,7 @@ fn main() -> Result<()> {
             match media_monitor.poll(&config.app_filtering) {
                 Ok(events) => {
                     // Handle now_playing event
-                    if let Some((mut track, ref bundle_id)) = events.now_playing {
+                    if let Some((track, ref bundle_id)) = events.now_playing {
                         log::info!(
                             "Now playing: {} - {} (album: {}) from {:?}",
                             track.artist,
@@ -355,7 +355,7 @@ fn main() -> Result<()> {
                     }
 
                     // Handle scrobble event
-                    if let Some((mut track, timestamp, ref bundle_id)) = events.scrobble {
+                    if let Some((track, timestamp, ref bundle_id)) = events.scrobble {
                         log::info!(
                             "Scrobble: {} - {} at {} from {:?}",
                             track.artist,

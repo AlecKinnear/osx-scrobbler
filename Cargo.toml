@@ -15,12 +15,16 @@ categories = ["multimedia", "gui"]
 media-remote = "0.3.6"
 
 # Scrobbling services
-rustfm-scrobble-proxy = "2.0.0"
+rustfm-scrobble-proxy = "2.0.1"
 listenbrainz = "0.8.1"
 
 # HTTP client and utilities for Last.fm token auth
 attohttpc = "0.28"
 md5 = "0.7"
+urlencoding = "2.1"
+
+# Image handling for tray icon
+image = "0.25"
 
 # Configuration and serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -47,6 +51,9 @@ chrono = "0.4"
 
 # Regex for text cleanup
 regex = "1.10"
+
+# Static lazy initialization for caching
+lazy_static = "1.4"
 
 # System tray and menu bar
 tray-icon = "0.19"

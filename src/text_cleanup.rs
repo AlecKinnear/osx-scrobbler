@@ -55,6 +55,86 @@ impl TextCleaner {
     }
 }
 
+/// Parse classical music metadata from sources like IDAGIO
+/// Extracts composer as artist, cleans up title, and returns UPC if found
+/// Returns (artist, title, upc)
+pub fn parse_classical_metadata(artist: &str, title: &str) -> (String, String, Option<String>) {
+    log::debug!(
+        "parse_classical_metadata called - artist: {:?}, title: {:?}",
+        artist,
+        title
+    );
+
+    // If artist is empty/blank, try to extract from title
+    if artist.trim().is_empty() {
+        log::debug!("Artist is empty/blank, attempting to extract from title");
+
+        let mut clean_title = title.to_string();
+        let mut upc: Option<String> = None;
+        
+        // Remove pipe suffixes like " | Stream on IDAGIO | IDAGIO"
+        if let Some(pipe_pos) = clean_title.find(" | Stream on IDAGIO") {
+            clean_title.truncate(pipe_pos);
+        } else if let Some(pipe_pos) = clean_title.find(" |") {
+            // Fallback: remove any pipe and everything after
+            clean_title.truncate(pipe_pos);
+        }
+        
+        // Extract and remove IDAGIO UPC codes (digit sequences at the end)
+        // Pattern: space followed by digits at the end of string
+        let trimmed = clean_title.trim_end_matches(char::is_numeric);
+        if trimmed.len() < clean_title.len() {
+            // We have trailing digits - extract them as UPC
+            let upc_str = clean_title[trimmed.len()..].to_string();
+            if !upc_str.is_empty() {
+                upc = Some(upc_str);
+                log::debug!("Extracted UPC: {:?}", upc);
+            }
+            clean_title = trimmed.to_string();
+        }
+        clean_title = clean_title.trim_end().to_string();
+
+        // Remove leading " - " if present
+        let clean_title = if clean_title.starts_with(" - ") {
+            clean_title[3..].to_string()
+        } else {
+            clean_title
+        };
+
+        log::debug!("Cleaned IDAGIO title: {:?}, UPC: {:?}", clean_title, upc);
+
+        // Look for "by [Composer Name]" pattern
+        if let Some(by_pos) = clean_title.find(" by ") {
+            log::debug!("Found ' by ' pattern in title");
+            let before_by = &clean_title[..by_pos];
+            let after_by = &clean_title[by_pos + 4..]; // Skip " by "
+
+            // Extract composer (text before any additional markers)
+            let composer = after_by.trim();
+
+            let result = (composer.to_string(), before_by.trim().to_string(), upc);
+            log::debug!(
+                "Parsed classical metadata (by pattern) - artist: {:?}, title: {:?}, upc: {:?}",
+                result.0,
+                result.1,
+                result.2
+            );
+            return result;
+        } else {
+            // No "by" pattern: treat clean title as the piece name, keep artist empty
+            // This allows MusicBrainz enrichment to work with just title + duration
+            log::debug!("No ' by ' pattern found - using title as piece: {:?}", clean_title);
+            let result = ("".to_string(), clean_title, upc);
+            return result;
+        }
+    } else {
+        log::debug!("Artist is not empty, skipping classical parsing");
+    }
+
+    // Otherwise, return as-is
+    (artist.to_string(), title.to_string(), None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,5 +240,54 @@ mod tests {
 
         // Should still clean with the valid pattern
         assert_eq!(cleaner.clean("Song [Explicit]"), "Song");
+    }
+
+    #[test]
+    fn test_parse_idagio_classical_metadata() {
+        let (artist, title, upc) = parse_classical_metadata(
+            "",
+            " - Canon and Gigue in D major P 37 by Johann Pachelbel | Stream on IDAGIO | IDAGIO",
+        );
+        assert_eq!(artist, "Johann Pachelbel");
+        assert_eq!(title, "Canon and Gigue in D major P 37");
+        assert_eq!(upc, None);
+    }
+
+    #[test]
+    fn test_parse_classical_metadata_without_by() {
+        let (artist, title, upc) =
+            parse_classical_metadata("", " - Perpetual Night: 17th Century Airs | Stream on IDAGIO | IDAGIO");
+        assert_eq!(artist, "");
+        assert_eq!(title, "Perpetual Night: 17th Century Airs");
+        assert_eq!(upc, None);
+    }
+
+    #[test]
+    fn test_parse_idagio_without_composer() {
+        // IDAGIO track without composer info - just title and UPC
+        let (artist, title, upc) =
+            parse_classical_metadata("", " - Perpetual Night: 17th Century Airs and Songs 3149020933848");
+        assert_eq!(artist, "");
+        // Should strip UPC code and leading dash
+        assert_eq!(title, "Perpetual Night: 17th Century Airs and Songs");
+        assert_eq!(upc, Some("3149020933848".to_string()));
+    }
+
+    #[test]
+    fn test_parse_idagio_with_upc_no_pipe() {
+        // IDAGIO track with just UPC code (new format)
+        let (artist, title, upc) =
+            parse_classical_metadata("", " - Cannon: Lord of Light, String Quartet & 5 Chansons de femme 5020926113221");
+        assert_eq!(artist, "");
+        assert_eq!(title, "Cannon: Lord of Light, String Quartet & 5 Chansons de femme");
+        assert_eq!(upc, Some("5020926113221".to_string()));
+    }
+
+    #[test]
+    fn test_parse_classical_metadata_with_existing_artist() {
+        let (artist, title, upc) = parse_classical_metadata("Artist", " - Title by Composer");
+        assert_eq!(artist, "Artist");
+        assert_eq!(title, " - Title by Composer");
+        assert_eq!(upc, None);
     }
 }

@@ -3,6 +3,7 @@ static GLOBAL: std::alloc::System = std::alloc::System;
 
 mod config;
 mod media_monitor;
+mod metadata_enricher;
 mod scrobbler;
 mod text_cleanup;
 mod ui;
@@ -132,10 +133,11 @@ fn main() -> Result<()> {
     let mut next_poll_time = Instant::now();
 
     // Define user events for tray menu actions
-    #[derive(Debug, Clone, Copy)]
+    #[derive(Debug, Clone)]
     enum UserEvent {
         TrayQuit,
         TrayLove,
+        TrayShowAlbumArt(()),
     }
 
     // Run event loop on main thread for tray icon
@@ -144,22 +146,28 @@ fn main() -> Result<()> {
         .expect("Failed to create event loop");
 
     // Get proxy to send events from other threads
-    let event_proxy = event_loop.create_proxy();
+    let _event_proxy = event_loop.create_proxy();
 
     // Spawn minimal thread to forward tray menu events to main event loop
     // This allows event-based wakeup instead of polling
     let quit_item_id = tray.quit_item.id().clone();
     let love_item_id = tray.love_item_id();
+    let now_playing_item_id = tray.now_playing_item_id();
+    let event_proxy_for_menu = event_loop.create_proxy();
     std::thread::spawn(move || {
         use tray_icon::menu::MenuEvent;
         loop {
             if let Ok(event) = MenuEvent::receiver().recv() {
                 if event.id == quit_item_id {
                     log::info!("Quit menu item clicked");
-                    let _ = event_proxy.send_event(UserEvent::TrayQuit);
+                    let _ = event_proxy_for_menu.send_event(UserEvent::TrayQuit);
                 } else if event.id == love_item_id {
                     log::info!("Love menu item clicked");
-                    let _ = event_proxy.send_event(UserEvent::TrayLove);
+                    let _ = event_proxy_for_menu.send_event(UserEvent::TrayLove);
+                } else if event.id == now_playing_item_id {
+                    log::info!("Now Playing menu item clicked");
+                    // We don't have access to tray here, send event to get URL from main thread
+                    let _ = event_proxy_for_menu.send_event(UserEvent::TrayShowAlbumArt(()));
                 }
             }
         }
@@ -197,6 +205,8 @@ fn main() -> Result<()> {
                             artist,
                             album: None,
                             duration: None,
+                            upc: None,
+                            lastfm_album_art_url: None,
                         };
 
                         // Get Last.fm credentials for loving
@@ -231,6 +241,18 @@ fn main() -> Result<()> {
                 }
                 return;
             }
+            winit::event::Event::UserEvent(UserEvent::TrayShowAlbumArt(_)) => {
+                // Show album art for currently playing track
+                if let Some(url) = tray.album_art_url() {
+                    log::info!("Opening album art: {}", url);
+                    if let Err(e) = ui::album_art_window::show_album_art(&url) {
+                        log::error!("Failed to show album art: {}", e);
+                    }
+                } else {
+                    log::warn!("No album art available for current track");
+                }
+                return;
+            }
             _ => {}
         }
 
@@ -244,7 +266,7 @@ fn main() -> Result<()> {
             match media_monitor.poll(&config.app_filtering) {
                 Ok(events) => {
                     // Handle now_playing event
-                    if let Some((ref track, ref bundle_id)) = events.now_playing {
+                    if let Some((mut track, ref bundle_id)) = events.now_playing {
                         log::info!(
                             "Now playing: {} - {} (album: {}) from {:?}",
                             track.artist,
@@ -253,16 +275,39 @@ fn main() -> Result<()> {
                             bundle_id
                         );
 
-                        // Send to scrobblers immediately with retries
+                        // Update tray immediately with current track info
+                        let track_str = format!("{} - {}", track.artist, track.title);
+                        if let Err(e) = tray.update_now_playing(Some(track_str)) {
+                            log::error!("Failed to update tray now playing: {}", e);
+                        }
+
+                        // Only enrich Idagio tracks (13-digit numeric UPC)
+                        // Other services don't benefit and would block the tray updates
+                        if let Some(ref upc) = track.upc {
+                            if upc.len() == 13 && upc.chars().all(|c| c.is_numeric()) {
+                                // Spawn enrichment in background thread to avoid blocking main loop
+                                let mut track_for_enrichment = track.clone();
+                                let config_for_enrichment = config.clone();
+                                std::thread::spawn(move || {
+                                    if let Err(e) = metadata_enricher::enrich_from_musicbrainz(&mut track_for_enrichment, Some(&config_for_enrichment)) {
+                                        log::debug!("Failed to enrich Idagio metadata: {}", e);
+                                    }
+                                });
+                            }
+                        }
+
+                        // Send to scrobblers immediately with short timeout.
+                        // For classical music with metadata matching difficulties, fail fast to allow
+                        // the user to see the track is playing (even if it won't scrobble).
                         for scrobbler in &scrobblers {
                             let backoff = ExponentialBackoff {
-                                max_elapsed_time: Some(Duration::from_secs(10)),
+                                max_elapsed_time: Some(Duration::from_secs(3)),
                                 ..Default::default()
                             };
 
                             let result = retry(backoff, || {
                                 scrobbler
-                                    .now_playing(track)
+                                    .now_playing(&track)
                                     .map_err(backoff::Error::transient)
                             });
 
@@ -271,11 +316,7 @@ fn main() -> Result<()> {
                             }
                         }
 
-                        // Update tray immediately
-                        let track_str = format!("{} - {}", track.artist, track.title);
-                        if let Err(e) = tray.update_now_playing(Some(track_str)) {
-                            log::error!("Failed to update tray now playing: {}", e);
-                        }
+
 
                         // Check if track is loved on Last.fm
                         if let Some(ref lastfm_config) = config.lastfm {
@@ -285,7 +326,7 @@ fn main() -> Result<()> {
                                     matches!(s, Service::LastFm(_))
                                 }) {
                                     match lastfm_scrobbler.is_loved(
-                                        track,
+                                        &track,
                                         &lastfm_config.api_key,
                                         &lastfm_config.api_secret,
                                         &lastfm_config.session_key,
@@ -314,7 +355,7 @@ fn main() -> Result<()> {
                     }
 
                     // Handle scrobble event
-                    if let Some((ref track, timestamp, ref bundle_id)) = events.scrobble {
+                    if let Some((mut track, timestamp, ref bundle_id)) = events.scrobble {
                         log::info!(
                             "Scrobble: {} - {} at {} from {:?}",
                             track.artist,
@@ -323,15 +364,33 @@ fn main() -> Result<()> {
                             bundle_id
                         );
 
+                        // Enrichment is async now, scrobble with what we have
+                        // (enrichment helps with better metadata but doesn't block scrobbling)
+
                         for scrobbler in &scrobblers {
+                            // Skip ListenBrainz for classical music (it requires exact MBID matches)
+                            // Classical music submissions will only go to Last.fm
+                            if let Service::ListenBrainz { name, .. } = scrobbler {
+                                // Classical music typically has empty initial artist or composer in artist field
+                                // ListenBrainz requires strict MBID matching, so skip for safety
+                                if track.artist.is_empty() || track.artist.len() < 3 {
+                                    log::debug!(
+                                        "Skipping ListenBrainz ({}): artist '{}' too short/unclear (classical music?)",
+                                        name,
+                                        track.artist
+                                    );
+                                    continue;
+                                }
+                            }
+
                             let backoff = ExponentialBackoff {
-                                max_elapsed_time: Some(Duration::from_secs(30)),
+                                max_elapsed_time: Some(Duration::from_secs(10)),
                                 ..Default::default()
                             };
 
                             let result = retry(backoff, || {
                                 scrobbler
-                                    .scrobble(track, timestamp)
+                                    .scrobble(&track, timestamp)
                                     .map_err(backoff::Error::transient)
                             });
 
@@ -505,6 +564,8 @@ const INFO_PLIST_TEMPLATE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
     <string>APPL</string>
     <key>CFBundleExecutable</key>
     <string>osx-scrobbler</string>
+    <key>CFBundleIconFile</key>
+    <string>UniversalScrobbler</string>
     <key>LSUIElement</key>
     <true/>
     <key>LSMinimumSystemVersion</key>
@@ -513,6 +574,38 @@ const INFO_PLIST_TEMPLATE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
     <true/>
 </dict>
 </plist>"#;
+
+/// Icon filename for the app bundle
+const ICON_FILENAME: &str = "UniversalScrobbler.icns";
+
+/// Copy the .icns icon file and menu bar PNG to the app bundle resources
+fn create_app_icon(resources_dir: &std::path::Path) -> Result<()> {
+    use std::fs;
+    use anyhow::Context;
+
+    // Path to the source icon in the project resources
+    let source_icon = concat!(env!("CARGO_MANIFEST_DIR"), "/resources/UniversalScrobbler.icns");
+
+    // Destination in the app bundle
+    let dest_icon = resources_dir.join(ICON_FILENAME);
+
+    // Copy the .icns file for the app icon
+    fs::copy(source_icon, &dest_icon)
+        .context("Failed to copy icon file to app bundle")?;
+
+    log::info!("Copied app icon from {} to {}", source_icon, dest_icon.display());
+
+    // Also copy the menu bar icon (32x32 PNG) to the bundle
+    let source_menu_icon = concat!(env!("CARGO_MANIFEST_DIR"), "/../universalescrobbler.iconset/icon_32.png");
+    let dest_menu_icon = resources_dir.join("icon_32.png");
+
+    fs::copy(source_menu_icon, &dest_menu_icon)
+        .context("Failed to copy menu bar icon to app bundle")?;
+
+    log::info!("Copied menu bar icon from {} to {}", source_menu_icon, dest_menu_icon.display());
+
+    Ok(())
+}
 
 /// Install OSX Scrobbler as a macOS app bundle in /Applications/
 fn handle_install_app() -> Result<()> {
@@ -561,6 +654,10 @@ fn handle_install_app() -> Result<()> {
         Err(e) => return Err(e.into()),
     }
 
+    // Create Resources directory for app icon
+    let resources_dir = contents_dir.join("Resources");
+    fs::create_dir_all(&resources_dir)?;
+
     // Get current binary path
     let current_exe = std::env::current_exe()?;
     let target_binary = macos_dir.join("osx-scrobbler");
@@ -574,6 +671,10 @@ fn handle_install_app() -> Result<()> {
     let mut perms = fs::metadata(&target_binary)?.permissions();
     perms.set_mode(0o755);
     fs::set_permissions(&target_binary, perms)?;
+
+    // Create app icon
+    println!("Creating app icon...");
+    create_app_icon(&resources_dir)?;
 
     // Create Info.plist
     println!("Creating Info.plist...");

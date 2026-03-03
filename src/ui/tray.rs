@@ -6,60 +6,25 @@ use tray_icon::{
     Icon, TrayIcon, TrayIconBuilder,
 };
 
-/// Create a simple icon for the tray
+/// Load the menu bar icon (32x32 for retina 2x display)
+/// Icon is embedded at compile time from the universal scrobbler iconset
 fn create_icon() -> Result<Icon> {
-    // Create a simple 22x22 template icon (macOS standard size)
-    // Template icons are monochrome and automatically adapt to the menu bar theme
-    let width = 22;
-    let height = 22;
-    let mut rgba = vec![0u8; width * height * 4];
+    // Icon is embedded at compile time
+    let icon_data = include_bytes!("../../../universalescrobbler.iconset/icon_32.png");
 
-    // Draw an elegant, refined musical note (eighth note)
-    for y in 0..height {
-        for x in 0..width {
-            let idx = (y * width + x) * 4;
-            let fx = x as f32;
-            let fy = y as f32;
+    log::info!("Loading embedded menu bar icon (32x32)");
 
-            // Elegant note head (filled circle) - lower left
-            let head_x = 5.0;
-            let head_y = 16.0;
-            let head_radius = 3.0;
-            let head_dx = fx - head_x;
-            let head_dy = fy - head_y;
-            let is_note_head = (head_dx * head_dx + head_dy * head_dy) <= (head_radius * head_radius);
+    // Parse the PNG data and create an Icon
+    let reader = image::ImageReader::new(std::io::Cursor::new(icon_data))
+        .with_guessed_format()
+        .context("Failed to detect icon format")?;
 
-            // Thin, elegant stem
-            let is_stem = (7..=8).contains(&x) && (4..=16).contains(&y);
+    let image = reader.decode().context("Failed to decode icon image")?;
+    let rgba_image = image.to_rgba8();
+    let (width, height) = rgba_image.dimensions();
 
-            // Refined curved flag - elegant arc shape
-            let is_flag = (y >= 3 && y <= 8) && (
-                (x == 9 && y >= 4 && y <= 6) ||
-                (x == 10 && y == 3) ||
-                (x == 10 && y == 4) ||
-                (x == 11 && y == 3) ||
-                (x == 11 && y >= 4 && y <= 7) ||
-                (x == 12 && y >= 5 && y <= 8)
-            );
-
-            if is_note_head || is_stem || is_flag {
-                rgba[idx] = 0; // R - black for template icons
-                rgba[idx + 1] = 0; // G
-                rgba[idx + 2] = 0; // B
-                rgba[idx + 3] = 255; // A - fully opaque
-            } else {
-                rgba[idx + 3] = 0; // Transparent background
-            }
-        }
-    }
-
-    log::info!(
-        "Creating tray icon with {}x{} pixels (elegant musical note)",
-        width,
-        height
-    );
-    Icon::from_rgba(rgba, width as u32, height as u32)
-        .context("Failed to create icon from RGBA data")
+    Icon::from_rgba(rgba_image.to_vec(), width, height)
+        .context("Failed to create icon from image data")
 }
 
 /// Shared state for the tray icon
@@ -67,6 +32,7 @@ fn create_icon() -> Result<Icon> {
 pub struct TrayState {
     pub now_playing: Option<String>,
     pub last_scrobbled: Option<String>,
+    pub album_art_url: Option<String>,
 }
 
 /// System tray manager
@@ -109,7 +75,6 @@ impl TrayManager {
             .with_menu(Box::new(menu.clone()))
             .with_tooltip("OSX Scrobbler")
             .with_icon(icon)
-            .with_icon_as_template(true)
             .build()
             .context("Failed to create tray icon")?;
 
@@ -129,6 +94,11 @@ impl TrayManager {
     /// Get the love item ID for event handling
     pub fn love_item_id(&self) -> tray_icon::menu::MenuId {
         self.love_item.id().clone()
+    }
+
+    /// Get the now playing item ID for event handling
+    pub fn now_playing_item_id(&self) -> tray_icon::menu::MenuId {
+        self.now_playing_item.id().clone()
     }
 
     /// Get the currently playing track
@@ -177,5 +147,15 @@ impl TrayManager {
         self.state.last_scrobbled = track;
 
         Ok(())
+    }
+
+    /// Update the album art URL for the currently playing track
+    pub fn update_album_art(&mut self, url: Option<String>) {
+        self.state.album_art_url = url;
+    }
+
+    /// Get the album art URL for the currently playing track
+    pub fn album_art_url(&self) -> Option<String> {
+        self.state.album_art_url.clone()
     }
 }

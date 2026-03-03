@@ -147,16 +147,46 @@ impl MediaMonitor {
         let artist = info.artist.clone()?;
         let album = info.album.clone();
 
-        // Apply text cleanup
-        let title = self.text_cleaner.clean(&title);
-        let artist = self.text_cleaner.clean(&artist);
-        let album = self.text_cleaner.clean_option(album);
+        log::info!(
+            "== Classical Track Processing ==\n  Information from IDAGIO: artist=\"{}\" title=\"{}\" album={:?}",
+            artist,
+            title,
+            album
+        );
+
+        // Parse classical music metadata first (e.g., from IDAGIO) before text cleanup
+        // so we can extract composer from title while IDAGIO suffixes are still present
+        let (parsed_artist, parsed_title, upc) = crate::text_cleanup::parse_classical_metadata(&artist, &title);
+
+        log::info!(
+            "  Cleaned information: artist=\"{}\" title=\"{}\" upc={:?}",
+            parsed_artist, parsed_title, upc
+        );
+
+        // Apply text cleanup after parsing
+        let title = self.text_cleaner.clean(&parsed_title);
+        let artist = self.text_cleaner.clean(&parsed_artist);
+        let mut album = self.text_cleaner.clean_option(album);
+
+        log::debug!(
+            "After text cleanup - artist: {:?}, title: {:?}, album: {:?}",
+            artist, title, album
+        );
+
+        // For IDAGIO: if no artist and no album, the title IS the album name
+        // Set album = title so enricher can match tracks
+        if artist.is_empty() && album.is_none() && !title.is_empty() {
+            log::debug!("Detected IDAGIO-style track: using title as album for enrichment");
+            album = Some(title.clone());
+        }
 
         Some(Track {
             title,
             artist,
             album,
             duration: info.duration.map(|d| d as u64),
+            upc,
+            lastfm_album_art_url: None,
         })
     }
 

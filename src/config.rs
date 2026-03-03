@@ -28,6 +28,9 @@ pub struct Config {
 
     /// ListenBrainz configurations (can have multiple instances)
     pub listenbrainz: Vec<ListenBrainzConfig>,
+
+    /// Idagio configuration for metadata enrichment
+    pub idagio: Option<IdagioConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +73,12 @@ pub struct ListenBrainzConfig {
     pub name: String,
     pub token: String,
     pub api_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IdagioConfig {
+    pub enabled: bool,
+    pub bearer_token: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -117,6 +126,10 @@ impl Default for Config {
                 token: String::new(),
                 api_url: "https://api.listenbrainz.org".to_string(),
             }],
+            idagio: Some(IdagioConfig {
+                enabled: false,
+                bearer_token: String::new(),
+            }),
         }
     }
 }

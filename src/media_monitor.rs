@@ -142,25 +142,30 @@ impl MediaMonitor {
     }
 
     /// Convert media_remote NowPlayingInfo to our Track structure
-    fn media_info_to_track(&self, info: &NowPlayingInfo) -> Option<Track> {
+    /// Only applies IDAGIO-specific metadata parsing if the track is from IDAGIO
+    fn media_info_to_track(&self, info: &NowPlayingInfo, bundle_id: &Option<String>) -> Option<Track> {
         let title = info.title.clone()?;
         let artist = info.artist.clone()?;
         let album = info.album.clone();
 
         log::debug!(
-            "Media info: artist=\"{}\" title=\"{}\" album={:?}",
+            "Media info: artist=\"{}\" title=\"{}\" album={:?} from {:?}",
             artist,
             title,
-            album
+            album,
+            bundle_id
         );
 
-        // Parse classical music metadata only if artist is empty (IDAGIO/classical source)
-        // For other sources (Yandex, Spotify, etc.), use artist and title as-is
-        let (parsed_artist, parsed_title, upc) = if artist.trim().is_empty() {
-            log::info!("== Classical Track Processing == (empty artist detected)");
+        // Only apply IDAGIO-specific metadata parsing if this is an IDAGIO track
+        let is_idagio = bundle_id.as_ref().map_or(false, |id| id.contains("idagio"));
+        
+        let (parsed_artist, parsed_title, upc) = if is_idagio && artist.trim().is_empty() {
+            // IDAGIO track with empty artist: apply classical metadata parsing
+            log::info!("== IDAGIO Classical Track Processing == (empty artist detected)");
             crate::text_cleanup::parse_classical_metadata(&artist, &title)
         } else {
-            // Non-classical source: use artist and title as provided
+            // Non-IDAGIO tracks or IDAGIO with valid artist: use as-is
+            // This preserves artist metadata from other sources (Yandex, Spotify, etc.)
             (artist.clone(), title.clone(), None)
         };
 
@@ -181,8 +186,8 @@ impl MediaMonitor {
 
         // For IDAGIO: if no artist and no album, the title IS the album name
         // Set album = title so enricher can match tracks
-        if artist.is_empty() && album.is_none() && !title.is_empty() {
-            log::debug!("Detected IDAGIO-style track: using title as album for enrichment");
+        if is_idagio && artist.is_empty() && album.is_none() && !title.is_empty() {
+            log::debug!("IDAGIO-style track: using title as album for enrichment");
             album = Some(title.clone());
         }
 
@@ -217,9 +222,9 @@ impl MediaMonitor {
             }
             log::debug!("now playing info: {:?}", info);
 
-            if let Some(track) = self.media_info_to_track(&info) {
+            let bundle_id = info.bundle_id.clone();
+            if let Some(track) = self.media_info_to_track(&info, &bundle_id) {
                 let duration = track.duration.unwrap_or(0);
-                let bundle_id = info.bundle_id.clone();
 
                 // Check if we should scrobble from this app
                 match self.should_scrobble_app(&bundle_id, app_filtering) {

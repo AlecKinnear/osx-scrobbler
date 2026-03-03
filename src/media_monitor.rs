@@ -163,19 +163,19 @@ impl MediaMonitor {
         let (parsed_artist, parsed_title, upc) = if is_idagio && artist.trim().is_empty() {
             // IDAGIO track with empty artist: apply classical metadata parsing
             log::info!("== IDAGIO Classical Track Processing == (empty artist detected)");
-            crate::text_cleanup::parse_classical_metadata(&artist, &title)
+            let result = crate::text_cleanup::parse_classical_metadata(&artist, &title);
+            log::debug!(
+                "Parsed classical metadata: artist=\"{}\" title=\"{}\" upc={:?}",
+                result.0, result.1, result.2
+            );
+            result
         } else {
             // Non-IDAGIO tracks or IDAGIO with valid artist: use as-is
             // This preserves artist metadata from other sources (Yandex, Spotify, etc.)
             (artist.clone(), title.clone(), None)
         };
 
-        log::debug!(
-            "After parse_classical_metadata: artist=\"{}\" title=\"{}\" upc={:?}",
-            parsed_artist, parsed_title, upc
-        );
-
-        // Apply text cleanup after parsing
+        // Apply text cleanup
         let title = self.text_cleaner.clean(&parsed_title);
         let artist = self.text_cleaner.clean(&parsed_artist);
         let mut album = self.text_cleaner.clean_option(album);

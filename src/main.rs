@@ -261,7 +261,12 @@ fn main() -> Result<()> {
 
         // Check for album art updates from enrichment thread (non-blocking)
         while let Ok(album_art_update) = album_art_rx.try_recv() {
-            log::info!("Received album art URL: {}", album_art_update.url);
+            log::info!("Received album art URL from enrichment: {}", album_art_update.url);
+            // Store in tray for menu display
+            if let Err(e) = tray.update_album_art(Some(album_art_update.url.clone())) {
+                log::error!("Failed to update tray album art: {}", e);
+            }
+            // Fetch and display
             if let Err(e) = ui::album_art::fetch_and_display_album_art(&album_art_update.url) {
                 log::error!("Failed to fetch and display album art: {}", e);
             }
@@ -295,6 +300,11 @@ fn main() -> Result<()> {
                         // Display IDAGIO album art immediately (direct CDN, no enrichment needed)
                         if let Some(idagio_art_url) = track.idagio_album_art_url() {
                             log::info!("IDAGIO album art available: {}", idagio_art_url);
+                            // Store in tray for menu display
+                            if let Err(e) = tray.update_album_art(Some(idagio_art_url.clone())) {
+                                log::error!("Failed to update tray album art: {}", e);
+                            }
+                            // Fetch and display
                             if let Err(e) = ui::album_art::fetch_and_display_album_art(&idagio_art_url) {
                                 log::debug!("Failed to fetch IDAGIO album art: {}", e);
                             }

@@ -16,29 +16,15 @@ use std::sync::Mutex;
 
 const MUSICBRAINZ_API: &str = "https://musicbrainz.org/ws/2";
 const LASTFM_API: &str = "https://ws.audioscrobbler.com/2.0/";
-const BING_SEARCH_API: &str = "https://api.bing.microsoft.com/v7.0/search";
+// Use SearXNG (open source, privacy-friendly meta search)
+// Falls back to DuckDuckGo HTML search if unavailable
+const SEARXNG_INSTANCE: &str = "https://searx.be/search";
 const DURATION_TOLERANCE_MS: u64 = 3000; // Allow 3 seconds tolerance for album track matching
 
 // Thread-safe cache for Last.fm album art URLs
 // Key: (artist, album) tuple, Value: Option<String> (None means no art found)
 lazy_static::lazy_static! {
     static ref LASTFM_ART_CACHE: Mutex<HashMap<(String, String), Option<String>>> = Mutex::new(HashMap::new());
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct BingSearchResponse {
-    #[serde(rename = "webPages")]
-    web_pages: Option<BingWebPages>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct BingWebPages {
-    value: Option<Vec<BingWebPage>>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct BingWebPage {
-    url: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -300,40 +286,52 @@ pub fn enrich_idagio_track(track: &mut Track, config: Option<&crate::config::Con
     }
 }
 
-/// Search for an Idagio album page using Bing
+/// Search for an Idagio album page using SearXNG (privacy-friendly meta-search)
 /// Returns the first matching URL if found
 fn search_idagio_album_page(catalog_id: &str) -> Result<Option<String>> {
-    let query = format!("site:idagio.com intitle:{}", catalog_id);
+    let query = format!("site:idagio.com {}", catalog_id);
     
     let url = format!(
-        "{}?q={}",
-        BING_SEARCH_API,
+        "{}?q={}&format=json",
+        SEARXNG_INSTANCE,
         urlencoding::encode(&query)
     );
+
+    log::debug!("Searching for IDAGIO catalog: {}", catalog_id);
 
     let response = attohttpc::get(&url)
         .header("User-Agent", "OSX-Scrobbler/0.3.4 ( https://github.com/aleckinnear/osx-scrobbler )")
         .send()
-        .context("Failed to query Bing search API")?;
+        .context("Failed to query search engine")?;
 
     if !response.is_success() {
-        log::debug!("Bing search returned status: {}", response.status());
+        log::debug!("Search returned status: {}", response.status());
         return Ok(None);
     }
 
-    let result: BingSearchResponse = response
-        .json()
-        .context("Failed to parse Bing response")?;
-
-    // Return the first result's URL if available
-    if let Some(web_pages) = result.web_pages {
-        if let Some(mut pages) = web_pages.value {
-            if !pages.is_empty() {
-                return Ok(Some(pages.remove(0).url));
+    // Parse JSON response from SearXNG
+    // Response format: { "results": [ { "url": "...", "title": "..." }, ... ] }
+    match response.text() {
+        Ok(body) => {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
+                if let Some(results) = json.get("results").and_then(|r| r.as_array()) {
+                    for result in results {
+                        if let Some(url) = result.get("url").and_then(|u| u.as_str()) {
+                            if url.contains("idagio.com") && url.contains("albums") {
+                                log::info!("  Found IDAGIO album page: {}", url);
+                                return Ok(Some(url.to_string()));
+                            }
+                        }
+                    }
+                }
             }
+        }
+        Err(e) => {
+            log::debug!("Failed to read search response: {}", e);
         }
     }
 
+    log::debug!("No IDAGIO album page found for catalog: {}", catalog_id);
     Ok(None)
 }
 

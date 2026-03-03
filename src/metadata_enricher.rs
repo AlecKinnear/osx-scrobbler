@@ -289,7 +289,8 @@ pub fn enrich_idagio_track(track: &mut Track, config: Option<&crate::config::Con
 /// Search for an Idagio album page using SearXNG (privacy-friendly meta-search)
 /// Returns the first matching URL if found
 fn search_idagio_album_page(catalog_id: &str) -> Result<Option<String>> {
-    let query = format!("site:idagio.com {}", catalog_id);
+    // Search for catalog ID in page title - IDAGIO albums have their catalog ID in the title
+    let query = format!("site:idagio.com intitle:{}", catalog_id);
     
     let url = format!(
         "{}?q={}&format=json",

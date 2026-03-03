@@ -247,12 +247,13 @@ fn main() -> Result<()> {
             winit::event::Event::UserEvent(UserEvent::TrayShowAlbumArt(_)) => {
                 // Show album art for currently playing track
                 if let Some(url) = tray.album_art_url() {
-                    log::info!("Opening album art: {}", url);
-                    if let Err(e) = ui::album_art_window::show_album_art(&url) {
+                    log::info!("User clicked: Opening album art window for: {}", url);
+                    // Show full-size album art window
+                    if let Err(e) = ui::album_art::fetch_and_display_album_art(&url) {
                         log::error!("Failed to show album art: {}", e);
                     }
                 } else {
-                    log::warn!("No album art available for current track");
+                    log::warn!("No album art available for current track - not yet enriched?");
                 }
                 return;
             }
@@ -282,7 +283,7 @@ fn main() -> Result<()> {
             match media_monitor.poll(&config.app_filtering) {
                 Ok(events) => {
                     // Handle now_playing event
-                    if let Some((track, ref bundle_id)) = events.now_playing {
+                    if let Some((mut track, ref bundle_id)) = events.now_playing {
                         log::info!(
                             "Now playing: {} - {} (album: {}) from {:?}",
                             track.artist,
@@ -310,29 +311,33 @@ fn main() -> Result<()> {
                             }
                         }
 
-                        // Only enrich Idagio tracks (13-digit numeric UPC)
-                        // Other services don't benefit and would block the tray updates
+                        // Enrich IDAGIO tracks synchronously to get proper metadata before scrobbling
+                        // This is critical: artist/title must be correct for Last.fm/ListenBrainz
                         if let Some(ref upc) = track.upc {
                             if upc.len() == 13 && upc.chars().all(|c| c.is_numeric()) {
-                                // Spawn enrichment in background thread to avoid blocking main loop
-                                let mut track_for_enrichment = track.clone();
-                                let config_for_enrichment = config.clone();
-                                let album_art_tx_clone = album_art_tx.clone();
-                                std::thread::spawn(move || {
-                                    if let Err(e) = metadata_enricher::enrich_from_musicbrainz(&mut track_for_enrichment, Some(&config_for_enrichment)) {
-                                        log::debug!("Failed to enrich Idagio metadata: {}", e);
+                                log::info!("IDAGIO track detected, attempting enrichment...");
+                                // Enrich synchronously to get metadata before scrobbling
+                                let mut track_clone = track.clone();
+                                if let Err(e) = metadata_enricher::enrich_from_musicbrainz(&mut track_clone, Some(&config)) {
+                                    log::debug!("Enrichment failed, will use current metadata: {}", e);
+                                } else {
+                                    // Enrichment succeeded, use the enriched track
+                                    track = track_clone.clone();
+                                    log::info!("Enrichment successful: {} - {}", track.artist, track.title);
+                                    
+                                    // Update display with enriched info
+                                    let track_str = format!("{} - {}", track.artist, track.title);
+                                    if let Err(e) = tray.update_now_playing(Some(track_str)) {
+                                        log::error!("Failed to update tray with enriched track: {}", e);
                                     }
                                     
-                                    // Send album art URL if available
-                                    if let Some(art_url) = track_for_enrichment.lastfm_album_art_url.as_ref()
-                                        .or(track_for_enrichment.idagio_album_art_url().as_ref()) {
-                                        if let Err(e) = album_art_tx_clone.send(ui::album_art::AlbumArtUpdate {
-                                            url: art_url.clone(),
-                                        }) {
-                                            log::debug!("Failed to send album art update: {}", e);
+                                    // Update album art if enrichment found it
+                                    if let Some(art_url) = track_clone.lastfm_album_art_url.as_ref() {
+                                        if let Err(e) = tray.update_album_art(Some(art_url.clone())) {
+                                            log::error!("Failed to update album art: {}", e);
                                         }
                                     }
-                                });
+                                }
                             }
                         }
 

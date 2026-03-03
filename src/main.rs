@@ -126,6 +126,9 @@ fn main() -> Result<()> {
     // Initialize media monitor
     let mut media_monitor = MediaMonitor::new(config.scrobble_threshold, text_cleaner);
 
+    // Create album art communication channel
+    let (album_art_tx, album_art_rx) = ui::album_art::create_album_art_channel();
+
     log::info!("Starting OSX Scrobbler...");
 
     // Setup polling state
@@ -256,6 +259,14 @@ fn main() -> Result<()> {
             _ => {}
         }
 
+        // Check for album art updates from enrichment thread (non-blocking)
+        while let Ok(album_art_update) = album_art_rx.try_recv() {
+            log::info!("Received album art URL: {}", album_art_update.url);
+            if let Err(e) = ui::album_art::fetch_and_display_album_art(&album_art_update.url) {
+                log::error!("Failed to fetch and display album art: {}", e);
+            }
+        }
+
         let now = Instant::now();
 
         // Only wake up when we need to poll media
@@ -288,9 +299,20 @@ fn main() -> Result<()> {
                                 // Spawn enrichment in background thread to avoid blocking main loop
                                 let mut track_for_enrichment = track.clone();
                                 let config_for_enrichment = config.clone();
+                                let album_art_tx_clone = album_art_tx.clone();
                                 std::thread::spawn(move || {
                                     if let Err(e) = metadata_enricher::enrich_from_musicbrainz(&mut track_for_enrichment, Some(&config_for_enrichment)) {
                                         log::debug!("Failed to enrich Idagio metadata: {}", e);
+                                    }
+                                    
+                                    // Send album art URL if available
+                                    if let Some(art_url) = track_for_enrichment.lastfm_album_art_url.as_ref()
+                                        .or(track_for_enrichment.idagio_album_art_url().as_ref()) {
+                                        if let Err(e) = album_art_tx_clone.send(ui::album_art::AlbumArtUpdate {
+                                            url: art_url.clone(),
+                                        }) {
+                                            log::debug!("Failed to send album art update: {}", e);
+                                        }
                                     }
                                 });
                             }

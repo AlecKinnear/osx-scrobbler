@@ -92,19 +92,13 @@ fn main() -> Result<()> {
             let token = lb_config.token.clone();
             let api_url = lb_config.api_url.clone();
 
-            let backoff = ExponentialBackoff {
-                max_elapsed_time: Some(Duration::from_secs(30)),
-                ..Default::default()
-            };
-
-            let result = retry(backoff, || {
-                Service::listenbrainz(name.clone(), token.clone(), api_url.clone())
-                    .map_err(backoff::Error::transient)
-            });
-
-            match result {
-                Ok(service) => scrobblers.push(service),
-                Err(e) => log::error!("Failed to initialize ListenBrainz after retries: {}", e),
+            log::debug!("ListenBrainz ({}): Attempting authentication with token: {}...", name, &token[..token.len().min(10)]);
+            match Service::listenbrainz(name.clone(), token.clone(), api_url.clone()) {
+                Ok(service) => {
+                    log::info!("ListenBrainz ({}): Authentication successful", name);
+                    scrobblers.push(service);
+                }
+                Err(e) => log::warn!("Failed to initialize ListenBrainz ({}): {}. Check your token at https://listenbrainz.org/settings/", name, e),
             }
         }
     }
@@ -207,6 +201,7 @@ fn main() -> Result<()> {
 
                         // Get Last.fm credentials for loving
                         if let Some(ref lastfm_config) = config.lastfm {
+                            let mut success = false;
                             for scrobbler in &scrobblers {
                                 match scrobbler.love(
                                     &track,
@@ -214,8 +209,17 @@ fn main() -> Result<()> {
                                     &lastfm_config.api_secret,
                                     &lastfm_config.session_key,
                                 ) {
-                                    Ok(_) => log::info!("Track loved successfully"),
+                                    Ok(_) => {
+                                        log::info!("Track loved successfully");
+                                        success = true;
+                                    }
                                     Err(e) => log::error!("Failed to love track: {}", e),
+                                }
+                            }
+                            // Update UI immediately on success
+                            if success {
+                                if let Err(e) = tray.update_love_status(true) {
+                                    log::error!("Failed to update love status: {}", e);
                                 }
                             }
                         } else {

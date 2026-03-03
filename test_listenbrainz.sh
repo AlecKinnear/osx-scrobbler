@@ -50,15 +50,18 @@ echo "Submitting listen..."
 echo ""
 
 # Send to ListenBrainz
-RESPONSE=$(curl -s -X POST "$API_URL/1/submit-listens" \
+echo "Request:"
+echo "$PAYLOAD"
+echo ""
+
+HTTP_CODE=$(curl -s -o /tmp/lb_response.txt -w "%{http_code}" \
+  -X POST "$API_URL/1/submit-listens" \
   -H "Authorization: Token $TOKEN" \
   -H "Content-Type: application/json" \
-  -d "$PAYLOAD" \
-  -w "\n%{http_code}")
+  -d "$PAYLOAD")
 
-# Extract status code and body
-HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-BODY=$(echo "$RESPONSE" | head -n-1)
+BODY=$(cat /tmp/lb_response.txt)
+rm -f /tmp/lb_response.txt
 
 echo "HTTP Status: $HTTP_CODE"
 echo "Response: $BODY"

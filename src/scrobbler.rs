@@ -95,8 +95,6 @@ pub enum Service {
     ListenBrainz {
         name: String,
         client: ListenBrainz,
-        token: String,
-        api_url: String,
     },
 }
 
@@ -120,12 +118,7 @@ impl Service {
             .authenticate(&token)
             .with_context(|| format!("Failed to authenticate with ListenBrainz ({})", name))?;
 
-        Ok(Self::ListenBrainz {
-            name,
-            client,
-            token,
-            api_url,
-        })
+        Ok(Self::ListenBrainz { name, client })
     }
 
     /// Submit a "now playing" update
@@ -138,12 +131,7 @@ impl Service {
                     .context("Failed to update now playing on Last.fm")?;
                 log::info!("Last.fm: Now playing updated");
             }
-            Self::ListenBrainz {
-                name,
-                client,
-                token: _,
-                api_url: _,
-            } => {
+            Self::ListenBrainz { name, client } => {
                 client
                     .playing_now(&track.artist, &track.title, track.album.as_deref())
                     .with_context(|| {
@@ -222,12 +210,7 @@ impl Service {
 
                 log::info!("Last.fm: Track loved");
             }
-            Self::ListenBrainz {
-                name,
-                client: _,
-                token: _,
-                api_url: _,
-            } => {
+            Self::ListenBrainz { name, .. } => {
                 // ListenBrainz doesn't have a public love/feedback API in the crate,
                 // but we could implement it via the raw API if needed
                 // For now, just log that it's not supported
@@ -249,41 +232,11 @@ impl Service {
                     .context("Failed to scrobble to Last.fm")?;
                 log::info!("Last.fm: Scrobbled successfully");
             }
-            Self::ListenBrainz {
-                name,
-                client: _,
-                token,
-                api_url,
-            } => {
-                // Submit with current timestamp (same day is enough)
-                use serde_json::json;
-
-                let payload = json!({
-                    "listen_type": "single",
-                    "payload": [{
-                        "listened_at": Utc::now().timestamp(),
-                        "track_metadata": {
-                            "artist_name": track.artist,
-                            "track_name": track.title,
-                            "release_name": track.album,
-                        }
-                    }]
-                });
-
-                let response = attohttpc::post(format!("{}/1/submit-listens", api_url))
-                    .header("Authorization", format!("Token {}", token))
-                    .header("Content-Type", "application/json")
-                    .text(serde_json::to_string(&payload)?)
-                    .send()
-                    .with_context(|| format!("Failed to submit listen to ListenBrainz ({})", name))?;
-
-                if !response.is_success() {
-                    anyhow::bail!(
-                        "ListenBrainz API error {}: {}",
-                        response.status(),
-                        response.text().unwrap_or_default()
-                    );
-                }
+            Self::ListenBrainz { name, client, .. } => {
+                // Use the simpler .listen() method which submits with current time
+                client
+                    .listen(&track.artist, &track.title, track.album.as_deref())
+                    .with_context(|| format!("Failed to scrobble to ListenBrainz ({})", name))?;
                 log::info!("ListenBrainz ({}): Scrobbled successfully", name);
             }
         }

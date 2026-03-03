@@ -14,26 +14,33 @@ fn create_icon() -> Result<Icon> {
     let height = 22;
     let mut rgba = vec![0u8; width * height * 4];
 
-    // Draw a simple, bold musical note
+    // Draw an elegant, refined musical note (eighth note)
     for y in 0..height {
         for x in 0..width {
             let idx = (y * width + x) * 4;
+            let fx = x as f32;
+            let fy = y as f32;
 
-            // Large note head (filled circle) - bottom area
-            let note_head_x = 9.0;
-            let note_head_y = 15.0;
-            let note_head_radius = 4.0;
-            let dx = x as f32 - note_head_x;
-            let dy = y as f32 - note_head_y;
-            let is_note_head = (dx * dx + dy * dy) <= (note_head_radius * note_head_radius);
+            // Elegant note head (filled circle) - lower left
+            let head_x = 5.0;
+            let head_y = 16.0;
+            let head_radius = 3.0;
+            let head_dx = fx - head_x;
+            let head_dy = fy - head_y;
+            let is_note_head = (head_dx * head_dx + head_dy * head_dy) <= (head_radius * head_radius);
 
-            // Thick stem (vertical line) - from note head up
-            let is_stem = (12..=14).contains(&x) && (3..=15).contains(&y);
+            // Thin, elegant stem
+            let is_stem = (7..=8).contains(&x) && (4..=16).contains(&y);
 
-            // Simple flag (diagonal line)
-            let is_flag = ((14..=16).contains(&x) && (3..=5).contains(&y))
-                || ((15..=17).contains(&x) && (5..=7).contains(&y))
-                || ((16..=18).contains(&x) && (7..=9).contains(&y));
+            // Refined curved flag - elegant arc shape
+            let is_flag = (y >= 3 && y <= 8) && (
+                (x == 9 && y >= 4 && y <= 6) ||
+                (x == 10 && y == 3) ||
+                (x == 10 && y == 4) ||
+                (x == 11 && y == 3) ||
+                (x == 11 && y >= 4 && y <= 7) ||
+                (x == 12 && y >= 5 && y <= 8)
+            );
 
             if is_note_head || is_stem || is_flag {
                 rgba[idx] = 0; // R - black for template icons
@@ -47,7 +54,7 @@ fn create_icon() -> Result<Icon> {
     }
 
     log::info!(
-        "Creating tray icon with {}x{} pixels (musical note)",
+        "Creating tray icon with {}x{} pixels (elegant musical note)",
         width,
         height
     );
@@ -81,7 +88,7 @@ impl TrayManager {
 
         // Create menu items
         let now_playing_item = MenuItem::new("Now Playing: None", false, None);
-        let love_item = MenuItem::new("🖤 Love", false, None);
+        let love_item = MenuItem::new("🤍 Love", false, None);
         let last_scrobble_item = MenuItem::new("Last Scrobbled: None", false, None);
         let separator = PredefinedMenuItem::separator();
         let quit_item = MenuItem::new("Quit", true, None);
@@ -132,9 +139,9 @@ impl TrayManager {
     /// Update love button status
     pub fn update_love_status(&mut self, is_loved: bool) -> Result<()> {
         let text = if is_loved {
-            "♥ Loved"
+            "♥️ Loved"
         } else {
-            "🖤 Love"
+            "🤍 Love"
         };
         self.love_item.set_text(text);
         Ok(())

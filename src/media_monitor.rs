@@ -142,22 +142,23 @@ impl MediaMonitor {
     }
 
     /// Convert media_remote NowPlayingInfo to our Track structure
-    /// Only applies IDAGIO-specific metadata parsing if the track is from IDAGIO
-    fn media_info_to_track(&self, info: &NowPlayingInfo, bundle_id: &Option<String>) -> Option<Track> {
+    /// Only applies IDAGIO-specific metadata parsing if IDAGIO markers are found in the metadata
+    fn media_info_to_track(&self, info: &NowPlayingInfo) -> Option<Track> {
         let title = info.title.clone()?;
         let artist = info.artist.clone()?;
         let album = info.album.clone();
 
         log::debug!(
-            "Media info: artist=\"{}\" title=\"{}\" album={:?} from {:?}",
+            "Media info: artist=\"{}\" title=\"{}\" album={:?}",
             artist,
             title,
-            album,
-            bundle_id
+            album
         );
 
-        // Only apply IDAGIO-specific metadata parsing if this is an IDAGIO track
-        let is_idagio = bundle_id.as_ref().map_or(false, |id| id.contains("idagio"));
+        // Detect IDAGIO by presence of "IDAGIO" in metadata (brand-specific marker)
+        // IDAGIO is not an English word, so its presence indicates IDAGIO source
+        let is_idagio = title.contains("IDAGIO") || artist.contains("IDAGIO") 
+                     || album.as_ref().map_or(false, |a| a.contains("IDAGIO"));
         
         let (parsed_artist, parsed_title, upc) = if is_idagio && artist.trim().is_empty() {
             // IDAGIO track with empty artist: apply classical metadata parsing
@@ -222,9 +223,9 @@ impl MediaMonitor {
             }
             log::debug!("now playing info: {:?}", info);
 
-            let bundle_id = info.bundle_id.clone();
-            if let Some(track) = self.media_info_to_track(&info, &bundle_id) {
+            if let Some(track) = self.media_info_to_track(&info) {
                 let duration = track.duration.unwrap_or(0);
+                let bundle_id = info.bundle_id.clone();
 
                 // Check if we should scrobble from this app
                 match self.should_scrobble_app(&bundle_id, app_filtering) {

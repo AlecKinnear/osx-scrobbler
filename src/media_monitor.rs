@@ -147,19 +147,25 @@ impl MediaMonitor {
         let artist = info.artist.clone()?;
         let album = info.album.clone();
 
-        log::info!(
-            "== Classical Track Processing ==\n  Information from IDAGIO: artist=\"{}\" title=\"{}\" album={:?}",
+        log::debug!(
+            "Media info: artist=\"{}\" title=\"{}\" album={:?}",
             artist,
             title,
             album
         );
 
-        // Parse classical music metadata first (e.g., from IDAGIO) before text cleanup
-        // so we can extract composer from title while IDAGIO suffixes are still present
-        let (parsed_artist, parsed_title, upc) = crate::text_cleanup::parse_classical_metadata(&artist, &title);
+        // Parse classical music metadata only if artist is empty (IDAGIO/classical source)
+        // For other sources (Yandex, Spotify, etc.), use artist and title as-is
+        let (parsed_artist, parsed_title, upc) = if artist.trim().is_empty() {
+            log::info!("== Classical Track Processing == (empty artist detected)");
+            crate::text_cleanup::parse_classical_metadata(&artist, &title)
+        } else {
+            // Non-classical source: use artist and title as provided
+            (artist.clone(), title.clone(), None)
+        };
 
-        log::info!(
-            "  Cleaned information: artist=\"{}\" title=\"{}\" upc={:?}",
+        log::debug!(
+            "After parse_classical_metadata: artist=\"{}\" title=\"{}\" upc={:?}",
             parsed_artist, parsed_title, upc
         );
 

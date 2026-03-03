@@ -127,7 +127,7 @@ fn main() -> Result<()> {
     let mut media_monitor = MediaMonitor::new(config.scrobble_threshold, text_cleaner);
 
     // Create album art communication channel
-    let (album_art_tx, album_art_rx) = ui::album_art::create_album_art_channel();
+    let (_album_art_tx, album_art_rx) = ui::album_art::create_album_art_channel();
 
     log::info!("Starting OSX Scrobbler...");
 

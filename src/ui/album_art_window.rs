@@ -12,19 +12,16 @@ pub fn show_album_art_image(image_data: &[u8]) -> Result<()> {
     log::info!("Displaying album art: {} bytes", image_data.len());
     
     // Validate image format by attempting to decode it
-    let reader = ImageReader::new(Cursor::new(image_data));
-    let width: u32;
-    let height: u32;
-    match reader.decode() {
-        Ok(image) => {
-            width = image.width();
-            height = image.height();
-            log::debug!("Album art dimensions: {}x{}", width, height);
-        }
-        Err(e) => {
-            return Err(anyhow::anyhow!("Failed to decode image: {}", e));
-        }
-    }
+    let reader = ImageReader::new(Cursor::new(image_data))
+        .with_guessed_format()
+        .map_err(|e| anyhow::anyhow!("Failed to detect image format: {}", e))?;
+    
+    let image = reader.decode()
+        .map_err(|e| anyhow::anyhow!("Failed to decode image: {}", e))?;
+    
+    let width = image.width();
+    let height = image.height();
+    log::debug!("Album art dimensions: {}x{}", width, height);
     
     // Create native window in background thread (don't block main event loop)
     let image_data = image_data.to_vec();
@@ -40,22 +37,21 @@ pub fn show_album_art_image(image_data: &[u8]) -> Result<()> {
 /// Create and display native macOS window with album art
 /// Runs in background thread
 fn create_album_art_window(image_data: &[u8]) -> Result<()> {
-    // For now, log the request. Full native window implementation
-    // would use objc2 to create NSWindow/NSImageView.
-    //
-    // TODO: Implement with objc2:
-    // 1. Create NSWindow (600x600 points for retina 1200x1200)
-    // 2. Create NSImageView with image scaling
-    // 3. Set window to be on top, with standard close/resize controls
-    // 4. Handle retina scaling automatically
+    log::info!(
+        "Album art window: {} bytes ({}MB) validated and ready for macOS NSWindow display",
+        image_data.len(),
+        image_data.len() / (1024 * 1024)
+    );
     
-    log::info!("Album art window requested: {} bytes of image data ready for display", image_data.len());
+    // TODO: Implement native NSWindow with NSImageView using objc2:
+    // 1. Create NSWindow (600x600 points = 1200x1200 pixels on retina)
+    // 2. Create NSImageView with image scaling
+    // 3. Display with close/resize controls
+    // 4. Auto-scale for retina displays
+    //
+    // Current status: Image validation complete, ready for native window rendering
     
     Ok(())
 }
 
-/// Legacy function - now handled by show_album_art_image
-pub fn show_album_art(url: &str) -> Result<()> {
-    log::info!("Album art URL (legacy): {}", url);
-    Ok(())
-}
+

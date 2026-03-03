@@ -292,6 +292,14 @@ fn main() -> Result<()> {
                             log::error!("Failed to update tray now playing: {}", e);
                         }
 
+                        // Display IDAGIO album art immediately (direct CDN, no enrichment needed)
+                        if let Some(idagio_art_url) = track.idagio_album_art_url() {
+                            log::info!("IDAGIO album art available: {}", idagio_art_url);
+                            if let Err(e) = ui::album_art::fetch_and_display_album_art(&idagio_art_url) {
+                                log::debug!("Failed to fetch IDAGIO album art: {}", e);
+                            }
+                        }
+
                         // Only enrich Idagio tracks (13-digit numeric UPC)
                         // Other services don't benefit and would block the tray updates
                         if let Some(ref upc) = track.upc {

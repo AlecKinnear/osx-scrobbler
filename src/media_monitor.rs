@@ -175,15 +175,20 @@ impl MediaMonitor {
             (artist.clone(), title.clone(), None)
         };
 
-        // Apply text cleanup
-        let title = self.text_cleaner.clean(&parsed_title);
-        let artist = self.text_cleaner.clean(&parsed_artist);
-        let mut album = self.text_cleaner.clean_option(album);
-
-        log::debug!(
-            "After text cleanup - artist: {:?}, title: {:?}, album: {:?}",
-            artist, title, album
-        );
+        // Apply text cleanup only for IDAGIO tracks that were parsed
+        let (artist, title, mut album) = if is_idagio {
+            let title = self.text_cleaner.clean(&parsed_title);
+            let artist = self.text_cleaner.clean(&parsed_artist);
+            let album = self.text_cleaner.clean_option(album);
+            log::debug!(
+                "Applied text cleanup: artist=\"{}\" title=\"{}\" album={:?}",
+                artist, title, album
+            );
+            (artist, title, album)
+        } else {
+            // Non-IDAGIO sources have clean metadata, skip text cleanup
+            (parsed_artist, parsed_title, album)
+        };
 
         // For IDAGIO: if no artist and no album, the title IS the album name
         // Set album = title so enricher can match tracks

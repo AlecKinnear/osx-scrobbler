@@ -3,12 +3,15 @@
 ## Build & Test Commands
 
 - **Build**: `cargo build`
-- **Run**: `cargo run` or `RUST_LOG=debug cargo run` for debug logging
+- **Run**: `RUST_LOG=osx_scrobbler=debug ./target/release/osx-scrobbler` (release with clean logs)
+- **Run (debug mode)**: `RUST_LOG=osx_scrobbler=debug cargo run`
 - **Test**: `cargo test`
 - **Single test**: `cargo test <test_name>`
 - **Lint**: `cargo clippy`
 - **Format**: `cargo fmt`
 - **Release build**: `cargo build --release`
+
+**Note on logging**: Always use `RUST_LOG=osx_scrobbler=debug` (not `RUST_LOG=debug`) to avoid verbose dependency logs from attohttpc, listenbrainz, etc.
 
 ## Architecture & Structure
 

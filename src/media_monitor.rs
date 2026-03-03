@@ -221,7 +221,10 @@ impl MediaMonitor {
                 // but keep existing session in case playback resumes
                 return Ok(events);
             }
-            log::debug!("now playing info: {:?}", info);
+            log::debug!(
+                "now playing info: title={:?}, artist={:?}, album={:?}, duration={:?}, is_playing={}, bundle={:?}",
+                info.title, info.artist, info.album, info.duration, info.is_playing.unwrap_or(false), info.bundle_id
+            );
 
             if let Some(track) = self.media_info_to_track(&info) {
                 let duration = track.duration.unwrap_or(0);

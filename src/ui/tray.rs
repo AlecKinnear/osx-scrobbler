@@ -6,13 +6,15 @@ use tray_icon::{
     Icon, TrayIcon, TrayIconBuilder,
 };
 
-/// Load the menu bar icon (32x32 for retina 2x display)
-/// Icon is embedded at compile time from the universal scrobbler iconset
+/// Load the menu bar icon (e.g. a quarter-note) from an embedded PNG.
+///
+/// The PNG file is stored in the repository at `resources/iconset/icon_32.png`
+/// and embedded at compile time.
 fn create_icon() -> Result<Icon> {
     // Icon is embedded at compile time
-    let icon_data = include_bytes!("../../../universalescrobbler.iconset/icon_32.png");
+    let icon_data = include_bytes!("../../resources/iconset/icon_32.png");
 
-    log::info!("Loading embedded menu bar icon (32x32)");
+    log::info!("Loading embedded menu bar icon from resources/iconset/icon_32.png");
 
     // Parse the PNG data and create an Icon
     let reader = image::ImageReader::new(std::io::Cursor::new(icon_data))
@@ -53,9 +55,9 @@ impl TrayManager {
         let state = TrayState::default();
 
         // Create menu items
-        let now_playing_item = MenuItem::new("Now Playing: None", false, None);
+        let now_playing_item = MenuItem::new("♩ Now Playing: None", false, None);
         let love_item = MenuItem::new("🤍 Love", false, None);
-        let last_scrobble_item = MenuItem::new("Last Scrobbled: None", false, None);
+        let last_scrobble_item = MenuItem::new("♩ Last Scrobbled: None", false, None);
         let separator = PredefinedMenuItem::separator();
         let quit_item = MenuItem::new("Quit", true, None);
 
@@ -73,10 +75,14 @@ impl TrayManager {
         let icon = create_icon()?;
         let tray_icon = TrayIconBuilder::new()
             .with_menu(Box::new(menu.clone()))
-            .with_tooltip("OSX Scrobbler")
+            .with_tooltip("♩ OSX Scrobbler")
             .with_icon(icon)
             .build()
             .context("Failed to create tray icon")?;
+
+        // On macOS, treat the icon as a template so the system
+        // automatically renders it appropriately in light/dark mode.
+        tray_icon.set_icon_as_template(true);
 
         log::info!("Tray icon created successfully");
 

@@ -623,13 +623,23 @@ const INFO_PLIST_TEMPLATE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 /// Icon filename for the app bundle
 const ICON_FILENAME: &str = "UniversalScrobbler.icns";
 
-/// Copy the .icns icon file and menu bar PNG to the app bundle resources
+/// Copy the .icns icon file to the app bundle resources, if available.
 fn create_app_icon(resources_dir: &std::path::Path) -> Result<()> {
-    use std::fs;
     use anyhow::Context;
+    use std::fs;
+    use std::path::Path;
 
     // Path to the source icon in the project resources
-    let source_icon = concat!(env!("CARGO_MANIFEST_DIR"), "/resources/UniversalScrobbler.icns");
+    let source_icon =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/resources/UniversalScrobbler.icns");
+
+    if !Path::new(source_icon).exists() {
+        log::warn!(
+            "App icon {} not found; using default macOS app icon instead",
+            source_icon
+        );
+        return Ok(());
+    }
 
     // Destination in the app bundle
     let dest_icon = resources_dir.join(ICON_FILENAME);
@@ -638,16 +648,11 @@ fn create_app_icon(resources_dir: &std::path::Path) -> Result<()> {
     fs::copy(source_icon, &dest_icon)
         .context("Failed to copy icon file to app bundle")?;
 
-    log::info!("Copied app icon from {} to {}", source_icon, dest_icon.display());
-
-    // Also copy the menu bar icon (32x32 PNG) to the bundle
-    let source_menu_icon = concat!(env!("CARGO_MANIFEST_DIR"), "/../universalescrobbler.iconset/icon_32.png");
-    let dest_menu_icon = resources_dir.join("icon_32.png");
-
-    fs::copy(source_menu_icon, &dest_menu_icon)
-        .context("Failed to copy menu bar icon to app bundle")?;
-
-    log::info!("Copied menu bar icon from {} to {}", source_menu_icon, dest_menu_icon.display());
+    log::info!(
+        "Copied app icon from {} to {}",
+        source_icon,
+        dest_icon.display()
+    );
 
     Ok(())
 }

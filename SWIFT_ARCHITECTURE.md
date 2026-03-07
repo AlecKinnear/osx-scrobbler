@@ -86,7 +86,6 @@ struct AppConfig: Codable {
     var appFiltering: AppFilteringConfig
     var lastfm: LastFmConfig?
     var listenbrainz: [ListenBrainzConfig]
-    var idagio: IdagioConfig?
 }
 ```
 
@@ -191,7 +190,6 @@ ScrobbleManager
 1. Metadata enrichment (MusicBrainz)
 2. Text cleanup with regex
 3. Album art caching
-4. IDAGIO special handling
 
 ### Phase 5: Polish
 1. App icon and menu bar icon

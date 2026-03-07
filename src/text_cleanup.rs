@@ -58,7 +58,9 @@ impl TextCleaner {
 /// Parse classical music metadata from sources like IDAGIO
 /// Extracts composer as artist, cleans up title, and returns UPC if found
 /// Returns (artist, title, upc)
-pub fn parse_classical_metadata(artist: &str, title: &str) -> (String, String, Option<String>) {
+/// NOTE: Currently unused - IDAGIO support removed for simplicity
+#[allow(dead_code)]
+fn _unused_parse_classical_metadata(artist: &str, title: &str) -> (String, String, Option<String>) {
     log::debug!(
         "parse_classical_metadata called - artist: {:?}, title: {:?}",
         artist,

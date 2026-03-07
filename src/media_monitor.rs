@@ -142,7 +142,6 @@ impl MediaMonitor {
     }
 
     /// Convert media_remote NowPlayingInfo to our Track structure
-    /// Only applies IDAGIO-specific metadata parsing if IDAGIO markers are found in the metadata
     fn media_info_to_track(&self, info: &NowPlayingInfo) -> Option<Track> {
         let title = info.title.clone()?;
         let artist = info.artist.clone()?;
@@ -155,54 +154,31 @@ impl MediaMonitor {
             album
         );
 
-        // Detect IDAGIO by presence of "IDAGIO" in metadata (brand-specific marker)
-        // IDAGIO is not an English word, so its presence indicates IDAGIO source
-        let is_idagio = title.contains("IDAGIO") || artist.contains("IDAGIO") 
+        // Detect IDAGIO by presence of "IDAGIO" in metadata
+        let is_idagio = title.contains("IDAGIO") || artist.contains("IDAGIO")
                      || album.as_ref().map_or(false, |a| a.contains("IDAGIO"));
-        
-        let (parsed_artist, parsed_title, upc) = if is_idagio && artist.trim().is_empty() {
-            // IDAGIO track with empty artist: apply classical metadata parsing
-            log::info!("== IDAGIO Classical Track Processing == (empty artist detected)");
-            let result = crate::text_cleanup::parse_classical_metadata(&artist, &title);
-            log::debug!(
-                "Parsed classical metadata: artist=\"{}\" title=\"{}\" upc={:?}",
-                result.0, result.1, result.2
-            );
-            result
-        } else {
-            // Non-IDAGIO tracks or IDAGIO with valid artist: use as-is
-            // This preserves artist metadata from other sources (Yandex, Spotify, etc.)
-            (artist.clone(), title.clone(), None)
-        };
 
-        // Apply text cleanup only for IDAGIO tracks that were parsed
-        let (artist, title, mut album) = if is_idagio {
-            let title = self.text_cleaner.clean(&parsed_title);
-            let artist = self.text_cleaner.clean(&parsed_artist);
-            let album = self.text_cleaner.clean_option(album);
-            log::debug!(
-                "Applied text cleanup: artist=\"{}\" title=\"{}\" album={:?}",
-                artist, title, album
-            );
-            (artist, title, album)
-        } else {
-            // Non-IDAGIO sources have clean metadata, skip text cleanup
-            (parsed_artist, parsed_title, album)
-        };
-
-        // For IDAGIO: if no artist and no album, the title IS the album name
-        // Set album = title so enricher can match tracks
-        if is_idagio && artist.is_empty() && album.is_none() && !title.is_empty() {
-            log::debug!("IDAGIO-style track: using title as album for enrichment");
-            album = Some(title.clone());
+        if is_idagio {
+            // IDAGIO detected - skip scrobbling entirely
+            log::info!("IDAGIO detected in metadata - skipping (IDAGIO not supported)");
+            return None;
         }
+
+        // Apply text cleanup to all metadata
+        let title = self.text_cleaner.clean(&title);
+        let artist = self.text_cleaner.clean(&artist);
+        let album = self.text_cleaner.clean_option(album);
+
+        log::debug!(
+            "Applied text cleanup: artist=\"{}\" title=\"{}\" album={:?}",
+            artist, title, album
+        );
 
         Some(Track {
             title,
             artist,
             album,
             duration: info.duration.map(|d| d as u64),
-            upc,
             lastfm_album_art_url: None,
         })
     }

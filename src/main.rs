@@ -298,49 +298,6 @@ fn main() -> Result<()> {
                             log::error!("Failed to update tray now playing: {}", e);
                         }
 
-                        // Display IDAGIO album art immediately (direct CDN, no enrichment needed)
-                        if let Some(idagio_art_url) = track.idagio_album_art_url() {
-                            log::info!("IDAGIO album art available: {}", idagio_art_url);
-                            // Store in tray for menu display
-                            if let Err(e) = tray.update_album_art(Some(idagio_art_url.clone())) {
-                                log::error!("Failed to update tray album art: {}", e);
-                            }
-                            // Fetch and display
-                            if let Err(e) = ui::album_art::fetch_and_display_album_art(&idagio_art_url) {
-                                log::debug!("Failed to fetch IDAGIO album art: {}", e);
-                            }
-                        }
-
-                        // Enrich IDAGIO tracks synchronously to get proper metadata before scrobbling
-                        // This is critical: artist/title must be correct for Last.fm/ListenBrainz
-                        if let Some(ref upc) = track.upc {
-                            if upc.len() == 13 && upc.chars().all(|c| c.is_numeric()) {
-                                log::info!("IDAGIO track detected, attempting enrichment...");
-                                // Enrich synchronously to get metadata before scrobbling
-                                let mut track_clone = track.clone();
-                                if let Err(e) = metadata_enricher::enrich_from_musicbrainz(&mut track_clone, Some(&config)) {
-                                    log::debug!("Enrichment failed, will use current metadata: {}", e);
-                                } else {
-                                    // Enrichment succeeded, use the enriched track
-                                    track = track_clone.clone();
-                                    log::info!("Enrichment successful: {} - {}", track.artist, track.title);
-                                    
-                                    // Update display with enriched info
-                                    let track_str = format!("{} - {}", track.artist, track.title);
-                                    if let Err(e) = tray.update_now_playing(Some(track_str)) {
-                                        log::error!("Failed to update tray with enriched track: {}", e);
-                                    }
-                                    
-                                    // Update album art if enrichment found it
-                                    if let Some(art_url) = track_clone.lastfm_album_art_url.as_ref() {
-                                        if let Err(e) = tray.update_album_art(Some(art_url.clone())) {
-                                            log::error!("Failed to update album art: {}", e);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
                         // Send to scrobblers immediately with short timeout.
                         // For classical music with metadata matching difficulties, fail fast to allow
                         // the user to see the track is playing (even if it won't scrobble).
@@ -409,24 +366,7 @@ fn main() -> Result<()> {
                             bundle_id
                         );
 
-                        // Enrichment is async now, scrobble with what we have
-                        // (enrichment helps with better metadata but doesn't block scrobbling)
-
                         for scrobbler in &scrobblers {
-                            // Skip ListenBrainz for classical music (it requires exact MBID matches)
-                            // Classical music submissions will only go to Last.fm
-                            if let Service::ListenBrainz { name, .. } = scrobbler {
-                                // Classical music typically has empty initial artist or composer in artist field
-                                // ListenBrainz requires strict MBID matching, so skip for safety
-                                if track.artist.is_empty() || track.artist.len() < 3 {
-                                    log::debug!(
-                                        "Skipping ListenBrainz ({}): artist '{}' too short/unclear (classical music?)",
-                                        name,
-                                        track.artist
-                                    );
-                                    continue;
-                                }
-                            }
 
                             let backoff = ExponentialBackoff {
                                 max_elapsed_time: Some(Duration::from_secs(10)),

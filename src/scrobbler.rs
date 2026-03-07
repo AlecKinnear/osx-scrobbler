@@ -91,18 +91,6 @@ pub struct Track {
     pub lastfm_album_art_url: Option<String>,
 }
 
-impl Track {
-    /// Get the album art URL if this is an Idagio track (has a UPC/catalog ID)
-    pub fn idagio_album_art_url(&self) -> Option<String> {
-        self.upc.as_ref().map(|upc| {
-            format!(
-                "https://idagio-images.global.ssl.fastly.net/albums/{}/main.jpg",
-                upc
-            )
-        })
-    }
-}
-
 /// Scrobbling service
 pub enum Service {
     LastFm(LastFmScrobbler),

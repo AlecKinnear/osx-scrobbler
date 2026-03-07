@@ -84,45 +84,38 @@ struct ServicesSettingsView: View {
     @Binding var config: AppConfig
 
     var body: some View {
-        Form {
-            Section("Last.fm") {
-                Toggle("Enable Last.fm", isOn: Binding(
-                    get: { config.lastfm?.enabled ?? false },
-                    set: { config.lastfm?.enabled = $0 }
-                ))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                LastFmAuthView(config: $config)
+                    .padding()
+                    .background(Color(NSColor.controlBackgroundColor))
+                    .cornerRadius(10)
 
-                TextField("API Key", text: Binding(
-                    get: { config.lastfm?.apiKey ?? "" },
-                    set: { config.lastfm?.apiKey = $0 }
-                ))
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("ListenBrainz")
+                        .font(.headline)
 
-                SecureField("API Secret", text: Binding(
-                    get: { config.lastfm?.apiSecret ?? "" },
-                    set: { config.lastfm?.apiSecret = $0 }
-                ))
+                    ForEach(config.listenbrainz.indices, id: \.self) { index in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle("Enable \(config.listenbrainz[index].name)", isOn: $config.listenbrainz[index].enabled)
 
-                SecureField("Session Key", text: Binding(
-                    get: { config.lastfm?.sessionKey ?? "" },
-                    set: { config.lastfm?.sessionKey = $0 }
-                ))
-            }
+                            TextField("Name", text: $config.listenbrainz[index].name)
+                                .textFieldStyle(.roundedBorder)
 
-            Section("ListenBrainz") {
-                ForEach(config.listenbrainz.indices, id: \.self) { index in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Toggle("Enable \(config.listenbrainz[index].name)", isOn: $config.listenbrainz[index].enabled)
+                            SecureField("Token", text: $config.listenbrainz[index].token)
+                                .textFieldStyle(.roundedBorder)
 
-                        TextField("Name", text: $config.listenbrainz[index].name)
-
-                        SecureField("Token", text: $config.listenbrainz[index].token)
-
-                        TextField("API URL", text: $config.listenbrainz[index].apiUrl)
+                            TextField("API URL", text: $config.listenbrainz[index].apiUrl)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        .padding()
+                        .background(Color(NSColor.controlBackgroundColor))
+                        .cornerRadius(10)
                     }
-                    .padding(.vertical, 4)
                 }
             }
+            .padding()
         }
-        .padding()
     }
 }
 
@@ -199,13 +192,17 @@ struct TextCleanupView: View {
 }
 
 struct AboutView: View {
+    @Environment(\.colorScheme) var colorScheme
+
     var body: some View {
         VStack(spacing: 20) {
-            Image(systemName: "music.note")
-                .font(.system(size: 64))
-                .foregroundColor(.accentColor)
+            Image("musical-note")
+                .resizable()
+                .renderingMode(.template)
+                .foregroundColor(colorScheme == .dark ? .white : .black)
+                .frame(width: 80, height: 80)
 
-            Text("Universal Scrobbler")
+            Text("macOS Scrobbler")
                 .font(.title)
                 .bold()
 

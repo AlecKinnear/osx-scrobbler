@@ -146,10 +146,21 @@ Configuration is stored in UserDefaults and can be accessed through the Settings
 
 - **Refresh Interval**: How often to check for media updates (default: 5 seconds)
 - **Scrobble Threshold**: Percentage of track to play before scrobbling (default: 50%)
-- **Last.fm**: API credentials and session key
+- **Last.fm**: User-friendly authentication interface with web-based OAuth flow
 - **ListenBrainz**: Multiple instances supported with tokens
 - **App Filtering**: Control which apps to scrobble from
 - **Text Cleanup**: Regex patterns for cleaning metadata
+
+### Last.fm Authentication
+
+The app now includes a streamlined authentication interface:
+1. Get API credentials from https://www.last.fm/api/account/create
+2. Enter credentials in Settings > Services
+3. Click "Authorize with Last.fm" to open the authorization page
+4. Grant permission on Last.fm website
+5. Return to the app and click "Complete Authorization"
+
+See [AUTHENTICATION.md](AUTHENTICATION.md) for detailed authentication documentation.
 
 ## MediaRemote Framework
 

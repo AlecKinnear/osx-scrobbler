@@ -40,7 +40,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: "music.note", accessibilityDescription: "Universal Scrobbler")
+            if let image = NSImage(named: "musical-note") {
+                image.isTemplate = true
+                button.image = image
+            } else {
+                button.image = NSImage(systemSymbolName: "music.note", accessibilityDescription: "macOS Scrobbler")
+            }
             button.action = #selector(togglePopover)
             button.target = self
         }

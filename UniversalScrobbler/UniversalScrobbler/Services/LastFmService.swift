@@ -14,6 +14,53 @@ class LastFmService: ScrobbleService {
         self.sessionKey = sessionKey
     }
 
+    static func getAuthURL(apiKey: String) -> URL? {
+        let urlString = "https://www.last.fm/api/auth/?api_key=\(apiKey)"
+        return URL(string: urlString)
+    }
+
+    static func getSessionKey(apiKey: String, apiSecret: String, token: String) async throws -> String {
+        let params: [String: String] = [
+            "method": "auth.getSession",
+            "api_key": apiKey,
+            "token": token
+        ]
+
+        let sorted = params.sorted { $0.key < $1.key }
+        let concatenated = sorted.map { "\($0.key)\($0.value)" }.joined()
+        let signatureString = concatenated + apiSecret
+        let hash = Insecure.MD5.hash(data: Data(signatureString.utf8))
+        let signature = hash.map { String(format: "%02hhx", $0) }.joined()
+
+        var signedParams = params
+        signedParams["api_sig"] = signature
+        signedParams["format"] = "json"
+
+        guard let url = URL(string: "https://ws.audioscrobbler.com/2.0/") else {
+            throw ScrobbleError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.httpBody = signedParams.percentEncoded()
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            throw ScrobbleError.apiError("HTTP error")
+        }
+
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let session = json["session"] as? [String: Any],
+              let sessionKey = session["key"] as? String else {
+            throw ScrobbleError.invalidResponse
+        }
+
+        return sessionKey
+    }
+
     func nowPlaying(_ track: Track) async throws {
         var params: [String: String] = [
             "method": "track.updateNowPlaying",

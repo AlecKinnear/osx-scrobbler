@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>Universal Scrobbler</string>
+	<string>macOS Scrobbler</string>
 	<key>CFBundleDisplayName</key>
-	<string>Universal Scrobbler</string>
+	<string>macOS Scrobbler</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.universalscrobbler</string>
+	<string>com.macosscrobbler</string>
 	<key>CFBundleVersion</key>
 	<string>1.0.0</string>
 	<key>CFBundleShortVersionString</key>

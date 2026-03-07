@@ -1,10 +1,10 @@
-# Universal Scrobbler (Swift/macOS)
+# macOS Scrobbler
 
 A native macOS music scrobbler application built with Swift and SwiftUI.
 
 ## Overview
 
-This is a complete Swift rewrite of the Universal Scrobbler, designed to be a native macOS menu bar application with proper UI configuration and modern Swift patterns.
+This is a complete Swift rewrite of the macOS Scrobbler, designed to be a native macOS menu bar application with proper UI configuration and modern Swift patterns.
 
 ## Features
 

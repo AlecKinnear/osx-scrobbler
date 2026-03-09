@@ -244,10 +244,9 @@ pub fn enrich_from_musicbrainz(track: &mut Track, config: Option<&crate::config:
             track.title = track_title;
             let output = format!("{} - {}", track.artist, track.title);
             log::info!("  Final output: [menu bar] \"{}\"", output);
-            if let Some(art_url) = track.idagio_album_art_url() {
-                log::info!("  Album art: {}", art_url);
-            } else if let Some(cfg) = config {
-                // Try to fetch Last.fm album art if Idagio art not available
+
+            // Try to fetch Last.fm album art
+            if let Some(cfg) = config {
                 if let Some(ref lastfm_config) = cfg.lastfm {
                     if lastfm_config.enabled {
                         match fetch_lastfm_album_art(&track.artist, &album, &lastfm_config.api_key) {

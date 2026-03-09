@@ -89,8 +89,9 @@ pub fn fetch_lastfm_album_art(artist: &str, album: &str, api_key: &str) -> Resul
         api_key
     );
 
+    let user_agent = format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
     let response = attohttpc::get(&url)
-        .header("User-Agent", "OSX-Scrobbler/0.3.4 ( https://github.com/aleckinnear/osx-scrobbler )")
+        .header("User-Agent", &user_agent)
         .send()
         .context("Failed to query Last.fm album API")?;
 
@@ -292,8 +293,9 @@ fn search_by_barcode_and_match_track(
         urlencoding::encode(&query)
     );
 
+    let user_agent = format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
     let response = attohttpc::get(&url)
-        .header("User-Agent", "OSX-Scrobbler/0.3.4 ( https://github.com/aleckinnear/osx-scrobbler )")
+        .header("User-Agent", &user_agent)
         .send()
         .context("Failed to query MusicBrainz API")?;
 
@@ -358,8 +360,9 @@ fn search_album_and_match_track(
         urlencoding::encode(&query)
     );
 
+    let user_agent = format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
     let response = attohttpc::get(&url)
-        .header("User-Agent", "OSX-Scrobbler/0.3.4 ( https://github.com/aleckinnear/osx-scrobbler )")
+        .header("User-Agent", &user_agent)
         .send()
         .context("Failed to query MusicBrainz API")?;
 

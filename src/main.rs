@@ -597,20 +597,14 @@ fn create_app_icon(resources_dir: &std::path::Path) -> Result<()> {
     // Destination in the app bundle
     let dest_icon = resources_dir.join(ICON_FILENAME);
 
+    println!("Source icon path: {}", source_icon);
+    println!("Destination icon path: {}", dest_icon.display());
+
     // Copy the .icns file for the app icon
     fs::copy(source_icon, &dest_icon)
         .context("Failed to copy icon file to app bundle")?;
 
-    log::info!("Copied app icon from {} to {}", source_icon, dest_icon.display());
-
-    // Also copy the menu bar icon (32x32 PNG) to the bundle
-    let source_menu_icon = concat!(env!("CARGO_MANIFEST_DIR"), "/resources/universalescrobbler.iconset/icon_32.png");
-    let dest_menu_icon = resources_dir.join("icon_32.png");
-
-    fs::copy(source_menu_icon, &dest_menu_icon)
-        .context("Failed to copy menu bar icon to app bundle")?;
-
-    log::info!("Copied menu bar icon from {} to {}", source_menu_icon, dest_menu_icon.display());
+    println!("Copied app icon from {} to {}", source_icon, dest_icon.display());
 
     Ok(())
 }

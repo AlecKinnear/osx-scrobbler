@@ -10,9 +10,11 @@ mod ui;
 
 use anyhow::Result;
 use backoff::{retry, ExponentialBackoff};
+use chrono;
 use clap::Parser;
 use media_monitor::MediaMonitor;
-use scrobbler::Service;
+use scrobbler::{Service, Track};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use ui::tray::TrayManager;
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -126,9 +128,6 @@ fn main() -> Result<()> {
     // Initialize media monitor
     let mut media_monitor = MediaMonitor::new(config.scrobble_threshold, text_cleaner);
 
-    // Create album art communication channel
-    let (_album_art_tx, album_art_rx) = ui::album_art::create_album_art_channel();
-
     log::info!("Starting OSX Scrobbler...");
 
     // Setup polling state
@@ -150,6 +149,9 @@ fn main() -> Result<()> {
 
     // Get proxy to send events from other threads
     let _event_proxy = event_loop.create_proxy();
+
+    // Channel for enriched tracks from background enrichment thread
+    let (enriched_track_tx, enriched_track_rx) = mpsc::channel::<Track>();
 
     // Spawn minimal thread to forward tray menu events to main event loop
     // This allows event-based wakeup instead of polling
@@ -247,30 +249,14 @@ fn main() -> Result<()> {
             winit::event::Event::UserEvent(UserEvent::TrayShowAlbumArt(_)) => {
                 // Show album art for currently playing track
                 if let Some(url) = tray.album_art_url() {
-                    log::info!("User clicked: Opening album art window for: {}", url);
-                    // Show full-size album art window
-                    if let Err(e) = ui::album_art::fetch_and_display_album_art(&url) {
-                        log::error!("Failed to show album art: {}", e);
-                    }
+                    log::info!("Opening album art: {}", url);
+                    log::debug!("Album art feature not yet implemented");
                 } else {
-                    log::warn!("No album art available for current track - not yet enriched?");
+                    log::warn!("No album art available for current track");
                 }
                 return;
             }
             _ => {}
-        }
-
-        // Check for album art updates from enrichment thread (non-blocking)
-        while let Ok(album_art_update) = album_art_rx.try_recv() {
-            log::info!("Received album art URL from enrichment: {}", album_art_update.url);
-            // Store in tray for menu display
-            if let Err(e) = tray.update_album_art(Some(album_art_update.url.clone())) {
-                log::error!("Failed to update tray album art: {}", e);
-            }
-            // Fetch and display
-            if let Err(e) = ui::album_art::fetch_and_display_album_art(&album_art_update.url) {
-                log::error!("Failed to fetch and display album art: {}", e);
-            }
         }
 
         let now = Instant::now();
@@ -297,7 +283,6 @@ fn main() -> Result<()> {
                         if let Err(e) = tray.update_now_playing(Some(track_str)) {
                             log::error!("Failed to update tray now playing: {}", e);
                         }
-
                         // Send to scrobblers immediately with short timeout.
                         // For classical music with metadata matching difficulties, fail fast to allow
                         // the user to see the track is playing (even if it won't scrobble).
@@ -357,7 +342,7 @@ fn main() -> Result<()> {
                     }
 
                     // Handle scrobble event
-                    if let Some((track, timestamp, ref bundle_id)) = events.scrobble {
+                    if let Some((mut track, timestamp, ref bundle_id)) = events.scrobble {
                         log::info!(
                             "Scrobble: {} - {} at {} from {:?}",
                             track.artist,
@@ -425,6 +410,44 @@ fn main() -> Result<()> {
                 }
                 Err(e) => {
                     log::error!("Error polling media: {}", e);
+                }
+            }
+
+            // Check for enriched tracks from background enrichment threads
+            // This processes metadata enrichment results and re-scrobbles with correct data
+            while let Ok(enriched_track) = enriched_track_rx.try_recv() {
+                log::info!(
+                    "Received enriched track: {} - {}",
+                    enriched_track.artist,
+                    enriched_track.title
+                );
+                
+                // Re-scrobble with enriched metadata
+                // Use current time as timestamp (approximately when the track is being scrobbled)
+                let ts = chrono::Utc::now();
+                
+                for scrobbler in &scrobblers {
+                    let backoff = ExponentialBackoff {
+                        max_elapsed_time: Some(Duration::from_secs(10)),
+                        ..Default::default()
+                    };
+
+                    let result = retry(backoff, || {
+                        scrobbler
+                            .scrobble(&enriched_track, ts)
+                            .map_err(backoff::Error::transient)
+                    });
+
+                    if let Err(e) = result {
+                        log::error!("Failed to scrobble enriched track after retries: {}", e);
+                    } else {
+                        log::info!("Successfully scrobbled enriched track");
+                    }
+                }
+
+                let track_str = format!("{} - {}", enriched_track.artist, enriched_track.title);
+                if let Err(e) = tray.update_last_scrobbled(Some(track_str)) {
+                    log::error!("Failed to update tray with enriched track: {}", e);
                 }
             }
 
@@ -581,7 +604,7 @@ fn create_app_icon(resources_dir: &std::path::Path) -> Result<()> {
     log::info!("Copied app icon from {} to {}", source_icon, dest_icon.display());
 
     // Also copy the menu bar icon (32x32 PNG) to the bundle
-    let source_menu_icon = concat!(env!("CARGO_MANIFEST_DIR"), "/../universalescrobbler.iconset/icon_32.png");
+    let source_menu_icon = concat!(env!("CARGO_MANIFEST_DIR"), "/resources/universalescrobbler.iconset/icon_32.png");
     let dest_menu_icon = resources_dir.join("icon_32.png");
 
     fs::copy(source_menu_icon, &dest_menu_icon)

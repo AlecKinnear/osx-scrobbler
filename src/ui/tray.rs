@@ -10,7 +10,7 @@ use tray_icon::{
 /// Icon is embedded at compile time from the universal scrobbler iconset
 fn create_icon() -> Result<Icon> {
     // Icon is embedded at compile time
-    let icon_data = include_bytes!("../../../universalescrobbler.iconset/icon_32.png");
+    let icon_data = include_bytes!("../../resources/universalescrobbler.iconset/icon_32.png");
 
     log::info!("Loading embedded menu bar icon (32x32)");
 

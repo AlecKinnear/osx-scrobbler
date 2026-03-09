@@ -179,6 +179,7 @@ impl MediaMonitor {
             artist,
             album,
             duration: info.duration.map(|d| d as u64),
+            upc: None,
             lastfm_album_art_url: None,
         })
     }

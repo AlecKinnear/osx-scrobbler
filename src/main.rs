@@ -13,8 +13,8 @@ use clap::Parser;
 use media_monitor::MediaMonitor;
 use scrobbler::{lastfm_is_loved, Service, Track};
 use std::{
-    sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex},
-    time::Duration,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
 use ui::tray::TrayManager;
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -39,8 +39,6 @@ struct Args {
     #[arg(long)]
     console: bool,
 }
-
-static IS_HANDLING_MEDIA_CHANGE: AtomicBool = AtomicBool::new(false);
 
 /// Build a NowPlayingInfo snapshot via JXA (osascript), which runs in a
 /// separate process and cannot segfault our app.  The low-level C APIs
@@ -258,6 +256,11 @@ fn main() -> Result<()> {
     let startup_proxy = event_loop.create_proxy();
     let _ = startup_proxy.send_event(UserEvent::MediaStateChanged);
 
+    // Debounce state: rapid media notifications are coalesced by delaying
+    // processing until 250ms after the last notification in a burst.
+    const DEBOUNCE_DELAY: Duration = Duration::from_millis(250);
+    let mut debounce_deadline: Option<Instant> = None;
+
     #[allow(deprecated)]
     event_loop.run(move |event, elwt| {
         // Handle user events (tray menu actions)
@@ -356,27 +359,23 @@ fn main() -> Result<()> {
         // Determine what triggered this wakeup and process accordingly
         let media_events = match event {
             winit::event::Event::UserEvent(UserEvent::MediaStateChanged) => {
-                // Use an atomic bool to prevent re-entrant calls to the media snapshot logic,
-                // which can cause crashes with the underlying MediaRemote framework on rapid
-                // track changes. This effectively debounces the storm of notifications.
-                if IS_HANDLING_MEDIA_CHANGE
-                    .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-                    .is_ok()
-                {
-                    let snapshot = fetch_media_snapshot();
-                    let result = media_monitor.handle_media_change(snapshot, &config.app_filtering);
-                    IS_HANDLING_MEDIA_CHANGE.store(false, Ordering::Release);
-                    result
-                } else {
-                    log::debug!("Ignoring concurrent MediaStateChanged event.");
-                    Ok(Default::default())
-                }
+                // Debounce: push the deadline forward on each notification so
+                // only the last event in a rapid burst triggers a snapshot.
+                debounce_deadline = Some(Instant::now() + DEBOUNCE_DELAY);
+                Ok(Default::default())
             }
             winit::event::Event::NewEvents(
                 winit::event::StartCause::ResumeTimeReached { .. },
             ) => {
-                // Scrobble deadline reached
-                media_monitor.check_scrobble()
+                if debounce_deadline.is_some_and(|d| Instant::now() >= d) {
+                    // Debounce period elapsed — process the coalesced notification
+                    debounce_deadline = None;
+                    let snapshot = fetch_media_snapshot();
+                    media_monitor.handle_media_change(snapshot, &config.app_filtering)
+                } else {
+                    // Scrobble deadline reached
+                    media_monitor.check_scrobble()
+                }
             }
             _ => Ok(Default::default()),
         };
@@ -551,8 +550,12 @@ fn main() -> Result<()> {
             }
         }
 
-        // Set control flow: sleep until scrobble deadline, or wait indefinitely
-        if let Some(deadline) = media_monitor.next_scrobble_deadline() {
+        // Set control flow: wake at the earliest of debounce deadline or scrobble deadline
+        let next_wakeup = [debounce_deadline, media_monitor.next_scrobble_deadline()]
+            .into_iter()
+            .flatten()
+            .min();
+        if let Some(deadline) = next_wakeup {
             elwt.set_control_flow(ControlFlow::WaitUntil(deadline));
         } else {
             elwt.set_control_flow(ControlFlow::Wait);

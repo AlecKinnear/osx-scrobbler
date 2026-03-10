@@ -9,9 +9,6 @@ use std::path::PathBuf;
 /// Main configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    /// Refresh interval in seconds for polling now playing status
-    pub refresh_interval: u64,
-
     /// Scrobble after playing this percentage of the track (50% default)
     pub scrobble_threshold: u8,
 
@@ -110,7 +107,6 @@ impl Default for AppFilteringConfig {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            refresh_interval: 5,
             scrobble_threshold: 50,
             cleanup: CleanupConfig::default(),
             app_filtering: AppFilteringConfig::default(),
@@ -185,11 +181,6 @@ impl Config {
 
     /// Validate the configuration
     pub fn validate(&self) -> Result<()> {
-        // Validate refresh interval
-        if self.refresh_interval == 0 {
-            anyhow::bail!("refresh_interval must be greater than 0");
-        }
-
         // Validate scrobble threshold (should be 1-100%)
         if self.scrobble_threshold == 0 || self.scrobble_threshold > 100 {
             anyhow::bail!("scrobble_threshold must be between 1 and 100");

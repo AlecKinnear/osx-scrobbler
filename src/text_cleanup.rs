@@ -95,8 +95,8 @@ pub fn parse_classical_metadata(artist: &str, title: &str) -> (String, String, O
         clean_title = clean_title.trim_end().to_string();
 
         // Remove leading " - " if present
-        let clean_title = if clean_title.starts_with(" - ") {
-            clean_title[3..].to_string()
+        let clean_title = if let Some(stripped) = clean_title.strip_prefix(" - ") {
+            stripped.to_string()
         } else {
             clean_title
         };

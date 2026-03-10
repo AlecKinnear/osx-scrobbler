@@ -303,6 +303,26 @@ fn main() -> Result<()> {
                             }
                         }
 
+                        // Spawn a background thread for metadata enrichment (MusicBrainz, etc.)
+                        // This is non-blocking. The result will be picked up by the event loop
+                        // from the `enriched_track_rx` channel.
+                        let enrich_tx = enriched_track_tx.clone();
+                        let mut enrich_track = track.clone();
+                        let enrich_config = config.clone();
+                        std::thread::spawn(move || {
+                            log::debug!(
+                                "Spawning enrichment thread for: {} - {}",
+                                enrich_track.artist,
+                                enrich_track.title
+                            );
+                            if let Err(e) = metadata_enricher::enrich_from_musicbrainz(&mut enrich_track, Some(&enrich_config)) {
+                                log::warn!("Metadata enrichment failed: {}", e);
+                            } else {
+                                // Send the (potentially) enriched track back to the main thread for processing.
+                                let _ = enrich_tx.send(enrich_track);
+                            }
+                        });
+
 
 
                         // Check if track is loved on Last.fm
@@ -413,41 +433,26 @@ fn main() -> Result<()> {
                 }
             }
 
-            // Check for enriched tracks from background enrichment threads
-            // This processes metadata enrichment results and re-scrobbles with correct data
+            // Check for enriched tracks from background enrichment threads.
+            // This updates the UI with corrected metadata and album art URLs.
             while let Ok(enriched_track) = enriched_track_rx.try_recv() {
                 log::info!(
-                    "Received enriched track: {} - {}",
+                    "Received enriched track: {} - {} (Album Art: {})",
                     enriched_track.artist,
-                    enriched_track.title
+                    enriched_track.title,
+                    enriched_track.lastfm_album_art_url.as_deref().unwrap_or("None")
                 );
-                
-                // Re-scrobble with enriched metadata
-                // Use current time as timestamp (approximately when the track is being scrobbled)
-                let ts = chrono::Utc::now();
-                
-                for scrobbler in &scrobblers {
-                    let backoff = ExponentialBackoff {
-                        max_elapsed_time: Some(Duration::from_secs(10)),
-                        ..Default::default()
-                    };
 
-                    let result = retry(backoff, || {
-                        scrobbler
-                            .scrobble(&enriched_track, ts)
-                            .map_err(backoff::Error::transient)
-                    });
-
-                    if let Err(e) = result {
-                        log::error!("Failed to scrobble enriched track after retries: {}", e);
-                    } else {
-                        log::info!("Successfully scrobbled enriched track");
-                    }
+                // Update the 'Now Playing' menu item with the corrected track title.
+                // This does not affect the track data that will be scrobbled, it's for display only.
+                let track_str = format!("{} - {}", enriched_track.artist, enriched_track.title);
+                if let Err(e) = tray.update_now_playing(Some(track_str)) {
+                    log::error!("Failed to update tray with enriched track info: {}", e);
                 }
 
-                let track_str = format!("{} - {}", enriched_track.artist, enriched_track.title);
-                if let Err(e) = tray.update_last_scrobbled(Some(track_str)) {
-                    log::error!("Failed to update tray with enriched track: {}", e);
+                // Update the tray state with the album art URL so it can be opened on click.
+                if let Err(e) = tray.update_album_art(enriched_track.lastfm_album_art_url) {
+                    log::error!("Failed to update tray with album art URL: {}", e);
                 }
             }
 

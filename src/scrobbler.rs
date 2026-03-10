@@ -193,20 +193,6 @@ impl Service {
         Ok(())
     }
 
-    /// Check if a track is loved on Last.fm
-    pub fn is_loved(&self, track: &Track, api_key: &str, api_secret: &str, session_key: &str) -> Result<bool> {
-        match self {
-            Self::LastFm(_) => {
-                // Delegate to the standalone, thread-safe function
-                lastfm_is_loved(track, api_key, api_secret, session_key)
-            }
-            Self::ListenBrainz { .. } => {
-                // ListenBrainz doesn't provide loved status, assume not loved
-                Ok(false)
-            }
-        }
-    }
-
     /// Love a track on Last.fm and ListenBrainz
     pub fn love(&self, track: &Track, api_key: &str, api_secret: &str, session_key: &str) -> Result<()> {
         match self {

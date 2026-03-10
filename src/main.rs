@@ -10,7 +10,7 @@ mod ui;
 use anyhow::Result;
 use backoff::{retry, ExponentialBackoff};
 use clap::Parser;
-use media_monitor::{MediaEvents, MediaMonitor};
+use media_monitor::MediaMonitor;
 use scrobbler::{lastfm_is_loved, Service, Track};
 use std::{
     sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex},
@@ -42,64 +42,40 @@ struct Args {
 
 static IS_HANDLING_MEDIA_CHANGE: AtomicBool = AtomicBool::new(false);
 
-/// Build a NowPlayingInfo snapshot from the low-level MediaRemote APIs.
-/// Uses catch_unwind to prevent crashes from rapid notifications during
-/// fast-forwarding or track changes.
+/// Build a NowPlayingInfo snapshot via JXA (osascript), which runs in a
+/// separate process and cannot segfault our app.  The low-level C APIs
+/// (`get_now_playing_info`) crash with SIGSEGV when MediaRemote passes a
+/// null CFDictionary during rapid track changes.
 fn fetch_media_snapshot() -> Option<media_remote::NowPlayingInfo> {
-    std::panic::catch_unwind(|| fetch_media_snapshot_inner())
-        .unwrap_or_else(|e| {
-            log::warn!("Media snapshot failed (likely rapid track change): {:?}", e);
-            None
-        })
-}
+    use media_remote::{get_raw_info, NowPlayingInfo};
+    use std::time::{Duration, SystemTime};
 
-fn fetch_media_snapshot_inner() -> Option<media_remote::NowPlayingInfo> {
-    use media_remote::{
-        get_now_playing_application_is_playing,
-        get_now_playing_client_bundle_identifier,
-        get_now_playing_client_parent_app_bundle_identifier, get_now_playing_info, InfoTypes,
-        NowPlayingInfo, Number,
-    };
-    use std::time::SystemTime;
+    let raw = get_raw_info()?;
 
-    let is_playing = get_now_playing_application_is_playing();
-    let raw_info = get_now_playing_info()?;
-
-    let bundle_id = get_now_playing_client_parent_app_bundle_identifier()
-        .or_else(get_now_playing_client_bundle_identifier);
-
-    let get_string = |key: &str| -> Option<String> {
-        match raw_info.get(key)? {
-            InfoTypes::String(s) => Some(s.clone()),
-            _ => None,
-        }
-    };
-
-    let get_float = |key: &str| -> Option<f64> {
-        match raw_info.get(key)? {
-            InfoTypes::Number(Number::Floating(f)) => Some(*f),
-            InfoTypes::Number(Number::Unsigned(u)) => Some(*u as f64),
-            InfoTypes::Number(Number::Signed(i)) => Some(*i as f64),
-            _ => None,
-        }
-    };
+    let mut bundle_id = raw["client"]["parentApplicationBundleIdentifier"].as_str();
+    if bundle_id.is_none() {
+        bundle_id = raw["client"]["bundleIdentifier"].as_str();
+    }
 
     Some(NowPlayingInfo {
-        is_playing,
-        title: get_string("kMRMediaRemoteNowPlayingInfoTitle"),
-        artist: get_string("kMRMediaRemoteNowPlayingInfoArtist"),
-        album: get_string("kMRMediaRemoteNowPlayingInfoAlbum"),
+        is_playing: raw["isPlaying"].as_bool(),
+        title: raw["info"]["kMRMediaRemoteNowPlayingInfoTitle"]
+            .as_str()
+            .map(|s| s.to_string()),
+        artist: raw["info"]["kMRMediaRemoteNowPlayingInfoArtist"]
+            .as_str()
+            .map(|s| s.to_string()),
+        album: raw["info"]["kMRMediaRemoteNowPlayingInfoAlbum"]
+            .as_str()
+            .map(|s| s.to_string()),
         album_cover: None,
-        elapsed_time: get_float("kMRMediaRemoteNowPlayingInfoElapsedTime"),
-        duration: get_float("kMRMediaRemoteNowPlayingInfoDuration"),
-        info_update_time: raw_info
-            .get("kMRMediaRemoteNowPlayingInfoTimestamp")
-            .and_then(|f| match f {
-                InfoTypes::SystemTime(t) => Some(*t),
-                _ => None,
-            })
+        elapsed_time: raw["info"]["kMRMediaRemoteNowPlayingInfoElapsedTime"].as_f64(),
+        duration: raw["info"]["kMRMediaRemoteNowPlayingInfoDuration"].as_f64(),
+        info_update_time: raw["info"]["kMRMediaRemoteNowPlayingInfoTimestamp"]
+            .as_u64()
+            .map(|t| SystemTime::UNIX_EPOCH + Duration::from_millis(t))
             .or(Some(SystemTime::now())),
-        bundle_id,
+        bundle_id: bundle_id.map(|b| b.to_string()),
         bundle_name: None,
         bundle_icon: None,
     })
@@ -274,9 +250,11 @@ fn main() -> Result<()> {
     }
     log::info!("Set activation policy to Accessory (no dock icon)");
 
+    // Create event proxies for use inside the event loop closure
+    let love_proxy = event_loop.create_proxy();
+    let love_status_proxy = event_loop.create_proxy();
+
     // Send an initial media check event so we detect what's already playing.
-    // We can't call fetch_media_snapshot() before the event loop starts because
-    // the low-level MediaRemote APIs need the run loop to be active.
     let startup_proxy = event_loop.create_proxy();
     let _ = startup_proxy.send_event(UserEvent::MediaStateChanged);
 
@@ -313,10 +291,10 @@ fn main() -> Result<()> {
                         };
 
                         // Get Last.fm credentials for loving
-                        if let Some(ref lastfm_config) = config.lastfm {
+                        if config.lastfm.is_some() {
                             let scrobblers = Arc::clone(&scrobblers);
                             let config = config.clone();
-                            let event_proxy = elwt.create_proxy();
+                            let event_proxy = love_proxy.clone();
 
                             std::thread::spawn(move || {
                                 let mut success = false;
@@ -407,7 +385,7 @@ fn main() -> Result<()> {
         match media_events {
             Ok(events) => {
                 // Handle now_playing event
-                if let Some((mut track, ref bundle_id, should_scrobble)) = events.now_playing {
+                if let Some((track, ref bundle_id, should_scrobble)) = events.now_playing {
                     log::info!(
                         "Now playing: {} - {} (album: {}) from {:?}",
                         track.artist,
@@ -416,7 +394,6 @@ fn main() -> Result<()> {
                         bundle_id
                     );
 
-                    let track_str = format!("{} - {}", track.artist, track.title);
                     let track_str = if track.artist.is_empty() {
                         track.title.clone()
                     } else {
@@ -478,7 +455,7 @@ fn main() -> Result<()> {
                                 let api_key = lastfm_config.api_key.clone();
                                 let api_secret = lastfm_config.api_secret.clone();
                                 let session_key = lastfm_config.session_key.clone();
-                                let event_proxy = elwt.create_proxy();
+                                let event_proxy = love_status_proxy.clone();
 
                                 std::thread::spawn(move || {
                                     if let Ok(is_loved) = lastfm_is_loved(&track_clone, &api_key, &api_secret, &session_key) {

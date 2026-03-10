@@ -101,7 +101,7 @@ impl Default for AppFilteringConfig {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            refresh_interval: 5,
+            refresh_interval: 20,
             scrobble_threshold: 50,
             cleanup: CleanupConfig::default(),
             app_filtering: AppFilteringConfig::default(),

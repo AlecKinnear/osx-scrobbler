@@ -186,11 +186,34 @@ impl MediaMonitor {
 
     /// Check for track changes and return events (now playing, scrobble)
     pub fn poll(&mut self, app_filtering: &AppFilteringConfig) -> Result<MediaEvents> {
-        // Clone media info to avoid holding the guard
-        let media_info = {
+        // Clone media info to avoid holding the guard.
+        let mut media_info = {
             let guard = self.now_playing.get_info();
             guard.as_ref().cloned()
         };
+
+        // WORKAROUND: Apps like Apple Music and Yandex Music can have a delay in updating metadata.
+        // If we detect a "playing" state without a title (or empty title), it's likely a transient state.
+        // We'll retry a few times with a short delay to give the system time to catch up.
+        if let Some(ref info) = media_info {
+            let title_missing = info.title.as_ref().map(|t| t.trim().is_empty()).unwrap_or(true);
+
+            if info.is_playing.unwrap_or(false) && title_missing {
+                log::debug!("Playing state detected without metadata. Retrying for up to 1 second...");
+                for i in 0..5 { // Retry 5 times over 1 second.
+                    std::thread::sleep(Duration::from_millis(200));
+                    let new_info_opt = { self.now_playing.get_info().as_ref().cloned() };
+                    if let Some(ref new_info) = new_info_opt {
+                        let new_title_ok = new_info.title.as_ref().map(|t| !t.trim().is_empty()).unwrap_or(false);
+                        if new_title_ok {
+                            log::info!("Successfully fetched metadata on retry #{}", i + 1);
+                            media_info = new_info_opt;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
 
         let mut events = MediaEvents::default();
 

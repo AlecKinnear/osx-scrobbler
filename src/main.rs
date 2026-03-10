@@ -3,7 +3,6 @@ static GLOBAL: std::alloc::System = std::alloc::System;
 
 mod config;
 mod media_monitor;
-mod metadata_enricher;
 mod scrobbler;
 mod text_cleanup;
 mod ui;
@@ -11,9 +10,12 @@ mod ui;
 use anyhow::Result;
 use backoff::{retry, ExponentialBackoff};
 use clap::Parser;
-use media_monitor::MediaMonitor;
-use scrobbler::Service;
-use std::time::{Duration, Instant};
+use media_monitor::{MediaEvents, MediaMonitor};
+use scrobbler::{lastfm_is_loved, Service, Track};
+use std::{
+    sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex},
+    time::Duration,
+};
 use ui::tray::TrayManager;
 use winit::event_loop::{ControlFlow, EventLoop};
 
@@ -36,6 +38,71 @@ struct Args {
     /// Force console output (show logs in terminal)
     #[arg(long)]
     console: bool,
+}
+
+static IS_HANDLING_MEDIA_CHANGE: AtomicBool = AtomicBool::new(false);
+
+/// Build a NowPlayingInfo snapshot from the low-level MediaRemote APIs.
+/// Uses catch_unwind to prevent crashes from rapid notifications during
+/// fast-forwarding or track changes.
+fn fetch_media_snapshot() -> Option<media_remote::NowPlayingInfo> {
+    std::panic::catch_unwind(|| fetch_media_snapshot_inner())
+        .unwrap_or_else(|e| {
+            log::warn!("Media snapshot failed (likely rapid track change): {:?}", e);
+            None
+        })
+}
+
+fn fetch_media_snapshot_inner() -> Option<media_remote::NowPlayingInfo> {
+    use media_remote::{
+        get_now_playing_application_is_playing,
+        get_now_playing_client_bundle_identifier,
+        get_now_playing_client_parent_app_bundle_identifier, get_now_playing_info, InfoTypes,
+        NowPlayingInfo, Number,
+    };
+    use std::time::SystemTime;
+
+    let is_playing = get_now_playing_application_is_playing();
+    let raw_info = get_now_playing_info()?;
+
+    let bundle_id = get_now_playing_client_parent_app_bundle_identifier()
+        .or_else(get_now_playing_client_bundle_identifier);
+
+    let get_string = |key: &str| -> Option<String> {
+        match raw_info.get(key)? {
+            InfoTypes::String(s) => Some(s.clone()),
+            _ => None,
+        }
+    };
+
+    let get_float = |key: &str| -> Option<f64> {
+        match raw_info.get(key)? {
+            InfoTypes::Number(Number::Floating(f)) => Some(*f),
+            InfoTypes::Number(Number::Unsigned(u)) => Some(*u as f64),
+            InfoTypes::Number(Number::Signed(i)) => Some(*i as f64),
+            _ => None,
+        }
+    };
+
+    Some(NowPlayingInfo {
+        is_playing,
+        title: get_string("kMRMediaRemoteNowPlayingInfoTitle"),
+        artist: get_string("kMRMediaRemoteNowPlayingInfoArtist"),
+        album: get_string("kMRMediaRemoteNowPlayingInfoAlbum"),
+        album_cover: None,
+        elapsed_time: get_float("kMRMediaRemoteNowPlayingInfoElapsedTime"),
+        duration: get_float("kMRMediaRemoteNowPlayingInfoDuration"),
+        info_update_time: raw_info
+            .get("kMRMediaRemoteNowPlayingInfoTimestamp")
+            .and_then(|f| match f {
+                InfoTypes::SystemTime(t) => Some(*t),
+                _ => None,
+            })
+            .or(Some(SystemTime::now())),
+        bundle_id,
+        bundle_name: None,
+        bundle_icon: None,
+    })
 }
 
 fn main() -> Result<()> {
@@ -62,11 +129,10 @@ fn main() -> Result<()> {
     // Load configuration (mutable for app filtering updates)
     let mut config = config::Config::load()?;
     log::info!("Configuration loaded successfully");
-    log::info!("Refresh interval: {}s", config.refresh_interval);
     log::info!("Scrobble threshold: {}%", config.scrobble_threshold);
 
     // Initialize scrobblers
-    let mut scrobblers: Vec<Service> = Vec::new();
+    let scrobblers: Arc<Mutex<Vec<Service>>> = Arc::new(Mutex::new(Vec::new()));
 
     // Initialize Last.fm if enabled
     if let Some(ref lastfm_config) = config.lastfm {
@@ -78,7 +144,7 @@ fn main() -> Result<()> {
                     lastfm_config.api_secret.clone(),
                     lastfm_config.session_key.clone(),
                 );
-                scrobblers.push(service);
+                scrobblers.lock().unwrap().push(service);
             } else {
                 log::warn!("Last.fm is enabled but session_key is not set. Skipping Last.fm.");
             }
@@ -93,26 +159,26 @@ fn main() -> Result<()> {
             let token = lb_config.token.clone();
             let api_url = lb_config.api_url.clone();
 
-            log::debug!("ListenBrainz ({}): Attempting authentication with token: {}...", name, &token[..token.len().min(10)]);
+            log::debug!(
+                "ListenBrainz ({}): Attempting authentication with token: {}...",
+                name,
+                &token[..token.len().min(10)]
+            );
             match Service::listenbrainz(name.clone(), token.clone(), api_url.clone()) {
                 Ok(service) => {
                     log::info!("ListenBrainz ({}): Authentication successful", name);
-                    scrobblers.push(service);
+                    scrobblers.lock().unwrap().push(service);
                 }
                 Err(e) => log::warn!("Failed to initialize ListenBrainz ({}): {}. Check your token at https://listenbrainz.org/settings/", name, e),
             }
         }
     }
 
-    if scrobblers.is_empty() {
+    if scrobblers.lock().unwrap().is_empty() {
         log::warn!(
             "No scrobblers enabled! The app will monitor media but won't scrobble anywhere."
         );
     }
-
-    // Initialize system tray
-    let mut tray = TrayManager::new()?;
-    log::info!("System tray initialized");
 
     // Initialize text cleaner
     let text_cleaner = text_cleanup::TextCleaner::new(&config.cleanup);
@@ -131,16 +197,14 @@ fn main() -> Result<()> {
 
     log::info!("Starting OSX Scrobbler...");
 
-    // Setup polling state
-    let refresh_interval = Duration::from_secs(config.refresh_interval);
-    let mut next_poll_time = Instant::now();
-
-    // Define user events for tray menu actions
+    // Define user events for tray menu actions and media notifications
     #[derive(Debug, Clone)]
     enum UserEvent {
         TrayQuit,
         TrayLove,
         TrayShowAlbumArt(()),
+        MediaStateChanged,
+        LoveStatusUpdated(bool),
     }
 
     // Run event loop on main thread for tray icon
@@ -148,11 +212,34 @@ fn main() -> Result<()> {
         .build()
         .expect("Failed to create event loop");
 
-    // Get proxy to send events from other threads
-    let _event_proxy = event_loop.create_proxy();
+    // Initialize system tray
+    // Must be initialized after EventLoop to ensure NSApplication is set up correctly by winit
+    let mut tray = TrayManager::new()?;
+    log::info!("System tray initialized");
+
+    // Register for macOS media notifications (event-driven, no polling)
+    use media_remote::{add_observer, register_for_now_playing_notifications, Notification};
+    register_for_now_playing_notifications();
+    log::info!("Media notifications registered (event-driven)");
+
+    // Set up observers that wake the event loop on media changes
+    let media_proxy = event_loop.create_proxy();
+    let media_proxy2 = event_loop.create_proxy();
+    let media_proxy3 = event_loop.create_proxy();
+    let _observer_info = add_observer(Notification::NowPlayingInfoDidChange, move || {
+        let _ = media_proxy.send_event(UserEvent::MediaStateChanged);
+    });
+    let _observer_app = add_observer(Notification::NowPlayingApplicationDidChange, move || {
+        let _ = media_proxy2.send_event(UserEvent::MediaStateChanged);
+    });
+    let _observer_state = add_observer(
+        Notification::NowPlayingApplicationIsPlayingDidChange,
+        move || {
+            let _ = media_proxy3.send_event(UserEvent::MediaStateChanged);
+        },
+    );
 
     // Spawn minimal thread to forward tray menu events to main event loop
-    // This allows event-based wakeup instead of polling
     let quit_item_id = tray.quit_item.id().clone();
     let love_item_id = tray.love_item_id();
     let now_playing_item_id = tray.now_playing_item_id();
@@ -187,6 +274,12 @@ fn main() -> Result<()> {
     }
     log::info!("Set activation policy to Accessory (no dock icon)");
 
+    // Send an initial media check event so we detect what's already playing.
+    // We can't call fetch_media_snapshot() before the event loop starts because
+    // the low-level MediaRemote APIs need the run loop to be active.
+    let startup_proxy = event_loop.create_proxy();
+    let _ = startup_proxy.send_event(UserEvent::MediaStateChanged);
+
     #[allow(deprecated)]
     event_loop.run(move |event, elwt| {
         // Handle user events (tray menu actions)
@@ -196,6 +289,13 @@ fn main() -> Result<()> {
                 elwt.exit();
                 return;
             }
+            winit::event::Event::UserEvent(UserEvent::LoveStatusUpdated(is_loved)) => {
+                let text = if is_loved { "♥️ Loved" } else { "🤍 Love" };
+                if let Err(e) = tray.set_love_button_state(text, true) {
+                    log::error!("Failed to update love button text: {}", e);
+                }
+                return;
+            }
             winit::event::Event::UserEvent(UserEvent::TrayLove) => {
                 // Love the currently playing track
                 if let Some(track_str) = tray.current_track() {
@@ -203,7 +303,7 @@ fn main() -> Result<()> {
                     if let Some(pos) = track_str.find(" - ") {
                         let artist = track_str[..pos].to_string();
                         let title = track_str[pos + 3..].to_string();
-                        let track = scrobbler::Track {
+                        let track = Track {
                             title,
                             artist,
                             album: None,
@@ -214,27 +314,31 @@ fn main() -> Result<()> {
 
                         // Get Last.fm credentials for loving
                         if let Some(ref lastfm_config) = config.lastfm {
-                            let mut success = false;
-                            for scrobbler in &scrobblers {
-                                match scrobbler.love(
-                                    &track,
-                                    &lastfm_config.api_key,
-                                    &lastfm_config.api_secret,
-                                    &lastfm_config.session_key,
-                                ) {
-                                    Ok(_) => {
-                                        log::info!("Track loved successfully");
-                                        success = true;
+                            let scrobblers = Arc::clone(&scrobblers);
+                            let config = config.clone();
+                            let event_proxy = elwt.create_proxy();
+
+                            std::thread::spawn(move || {
+                                let mut success = false;
+                                if let Some(ref lastfm_config) = config.lastfm {
+                                    for scrobbler in scrobblers.lock().unwrap().iter() {
+                                        if let Err(e) = scrobbler.love(
+                                            &track,
+                                            &lastfm_config.api_key,
+                                            &lastfm_config.api_secret,
+                                            &lastfm_config.session_key,
+                                        ) {
+                                            log::error!("Failed to love track: {}", e);
+                                        } else {
+                                            log::info!("Track loved successfully");
+                                            success = true;
+                                        }
                                     }
-                                    Err(e) => log::error!("Failed to love track: {}", e),
                                 }
-                            }
-                            // Update UI immediately on success
-                            if success {
-                                if let Err(e) = tray.update_love_status(true) {
-                                    log::error!("Failed to update love status: {}", e);
+                                if success {
+                                    let _ = event_proxy.send_event(UserEvent::LoveStatusUpdated(true));
                                 }
-                            }
+                            });
                         } else {
                             log::warn!("Last.fm not configured, cannot love track");
                         }
@@ -263,166 +367,149 @@ fn main() -> Result<()> {
         // Check for album art updates from enrichment thread (non-blocking)
         while let Ok(album_art_update) = album_art_rx.try_recv() {
             log::info!("Received album art URL from enrichment: {}", album_art_update.url);
-            // Store in tray for menu display
             if let Err(e) = tray.update_album_art(Some(album_art_update.url.clone())) {
                 log::error!("Failed to update tray album art: {}", e);
             }
-            // Fetch and display
             if let Err(e) = ui::album_art::fetch_and_display_album_art(&album_art_update.url) {
                 log::error!("Failed to fetch and display album art: {}", e);
             }
         }
 
-        let now = Instant::now();
+        // Determine what triggered this wakeup and process accordingly
+        let media_events = match event {
+            winit::event::Event::UserEvent(UserEvent::MediaStateChanged) => {
+                // Use an atomic bool to prevent re-entrant calls to the media snapshot logic,
+                // which can cause crashes with the underlying MediaRemote framework on rapid
+                // track changes. This effectively debounces the storm of notifications.
+                if IS_HANDLING_MEDIA_CHANGE
+                    .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+                    .is_ok()
+                {
+                    let snapshot = fetch_media_snapshot();
+                    let result = media_monitor.handle_media_change(snapshot, &config.app_filtering);
+                    IS_HANDLING_MEDIA_CHANGE.store(false, Ordering::Release);
+                    result
+                } else {
+                    log::debug!("Ignoring concurrent MediaStateChanged event.");
+                    Ok(Default::default())
+                }
+            }
+            winit::event::Event::NewEvents(
+                winit::event::StartCause::ResumeTimeReached { .. },
+            ) => {
+                // Scrobble deadline reached
+                media_monitor.check_scrobble()
+            }
+            _ => Ok(Default::default()),
+        };
 
-        // Only wake up when we need to poll media
-        elwt.set_control_flow(ControlFlow::WaitUntil(next_poll_time));
+        // Process media events
+        match media_events {
+            Ok(events) => {
+                // Handle now_playing event
+                if let Some((mut track, ref bundle_id, should_scrobble)) = events.now_playing {
+                    log::info!(
+                        "Now playing: {} - {} (album: {}) from {:?}",
+                        track.artist,
+                        track.title,
+                        track.album.as_deref().unwrap_or("Unknown"),
+                        bundle_id
+                    );
 
-        // Check if it's time to poll media
-        if now >= next_poll_time {
-            match media_monitor.poll(&config.app_filtering) {
-                Ok(events) => {
-                    // Handle now_playing event
-                    if let Some((mut track, ref bundle_id)) = events.now_playing {
-                        log::info!(
-                            "Now playing: {} - {} (album: {}) from {:?}",
-                            track.artist,
-                            track.title,
-                            track.album.as_deref().unwrap_or("Unknown"),
-                            bundle_id
-                        );
+                    let track_str = format!("{} - {}", track.artist, track.title);
+                    let track_str = if track.artist.is_empty() {
+                        track.title.clone()
+                    } else {
+                        format!("{} - {}", track.artist, track.title)
+                    };
 
-                        // Update tray immediately with current track info
-                        let track_str = format!("{} - {}", track.artist, track.title);
-                        if let Err(e) = tray.update_now_playing(Some(track_str)) {
-                            log::error!("Failed to update tray now playing: {}", e);
+                    if let Err(e) = tray.update_now_playing(Some(track_str)) {
+                        log::error!("Failed to update tray now playing: {}", e);
+                    }
+
+                    // Display IDAGIO album art immediately
+                    if let Some(idagio_art_url) = track.idagio_album_art_url() {
+                        log::info!("IDAGIO album art available: {}", idagio_art_url);
+                        if let Err(e) = tray.update_album_art(Some(idagio_art_url.clone())) {
+                            log::error!("Failed to update tray album art: {}", e);
                         }
-
-                        // Display IDAGIO album art immediately (direct CDN, no enrichment needed)
-                        if let Some(idagio_art_url) = track.idagio_album_art_url() {
-                            log::info!("IDAGIO album art available: {}", idagio_art_url);
-                            // Store in tray for menu display
-                            if let Err(e) = tray.update_album_art(Some(idagio_art_url.clone())) {
-                                log::error!("Failed to update tray album art: {}", e);
-                            }
-                            // Fetch and display
-                            if let Err(e) = ui::album_art::fetch_and_display_album_art(&idagio_art_url) {
-                                log::debug!("Failed to fetch IDAGIO album art: {}", e);
-                            }
-                        }
-
-                        // Enrich IDAGIO tracks synchronously to get proper metadata before scrobbling
-                        // This is critical: artist/title must be correct for Last.fm/ListenBrainz
-                        if let Some(ref upc) = track.upc {
-                            if upc.len() == 13 && upc.chars().all(|c| c.is_numeric()) {
-                                log::info!("IDAGIO track detected, attempting enrichment...");
-                                // Enrich synchronously to get metadata before scrobbling
-                                let mut track_clone = track.clone();
-                                if let Err(e) = metadata_enricher::enrich_from_musicbrainz(&mut track_clone, Some(&config)) {
-                                    log::debug!("Enrichment failed, will use current metadata: {}", e);
-                                } else {
-                                    // Enrichment succeeded, use the enriched track
-                                    track = track_clone.clone();
-                                    log::info!("Enrichment successful: {} - {}", track.artist, track.title);
-                                    
-                                    // Update display with enriched info
-                                    let track_str = format!("{} - {}", track.artist, track.title);
-                                    if let Err(e) = tray.update_now_playing(Some(track_str)) {
-                                        log::error!("Failed to update tray with enriched track: {}", e);
-                                    }
-                                    
-                                    // Update album art if enrichment found it
-                                    if let Some(art_url) = track_clone.lastfm_album_art_url.as_ref() {
-                                        if let Err(e) = tray.update_album_art(Some(art_url.clone())) {
-                                            log::error!("Failed to update album art: {}", e);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Send to scrobblers immediately with short timeout.
-                        // For classical music with metadata matching difficulties, fail fast to allow
-                        // the user to see the track is playing (even if it won't scrobble).
-                        for scrobbler in &scrobblers {
-                            let backoff = ExponentialBackoff {
-                                max_elapsed_time: Some(Duration::from_secs(3)),
-                                ..Default::default()
-                            };
-
-                            let result = retry(backoff, || {
-                                scrobbler
-                                    .now_playing(&track)
-                                    .map_err(backoff::Error::transient)
-                            });
-
-                            if let Err(e) = result {
-                                log::error!("Failed to send now playing after retries: {}", e);
-                            }
-                        }
-
-
-
-                        // Check if track is loved on Last.fm
-                        if let Some(ref lastfm_config) = config.lastfm {
-                            if !lastfm_config.session_key.is_empty() {
-                                // Find the Last.fm scrobbler
-                                if let Some(lastfm_scrobbler) = scrobblers.iter().find(|s| {
-                                    matches!(s, Service::LastFm(_))
-                                }) {
-                                    match lastfm_scrobbler.is_loved(
-                                        &track,
-                                        &lastfm_config.api_key,
-                                        &lastfm_config.api_secret,
-                                        &lastfm_config.session_key,
-                                    ) {
-                                        Ok(is_loved) => {
-                                            if let Err(e) = tray.update_love_status(is_loved) {
-                                                log::error!("Failed to update love status: {}", e);
-                                            }
-                                        }
-                                        Err(e) => {
-                                            log::warn!("Failed to check if track is loved: {}", e);
-                                            // Default to unloved if we can't check
-                                            if let Err(e) = tray.update_love_status(false) {
-                                                log::error!("Failed to update love status: {}", e);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            // Reset to unloved if Last.fm not configured
-                            if let Err(e) = tray.update_love_status(false) {
-                                log::error!("Failed to update love status: {}", e);
-                            }
+                        if let Err(e) = ui::album_art::fetch_and_display_album_art(&idagio_art_url) {
+                            log::debug!("Failed to fetch IDAGIO album art: {}", e);
                         }
                     }
 
-                    // Handle scrobble event
-                    if let Some((track, timestamp, ref bundle_id)) = events.scrobble {
-                        log::info!(
-                            "Scrobble: {} - {} at {} from {:?}",
-                            track.artist,
-                            track.title,
-                            timestamp.format("%Y-%m-%d %H:%M:%S"),
-                            bundle_id
-                        );
+                    // Send now playing to scrobblers
+                    if should_scrobble {
+                        let scrobblers = Arc::clone(&scrobblers);
+                        let track = track.clone();
+                        std::thread::spawn(move || {
+                            for scrobbler in scrobblers.lock().unwrap().iter() {
+                                let backoff = ExponentialBackoff {
+                                    max_elapsed_time: Some(Duration::from_secs(3)),
+                                    ..Default::default()
+                                };
+                                let result = retry(backoff, || {
+                                    scrobbler
+                                        .now_playing(&track)
+                                        .map_err(backoff::Error::transient)
+                                });
+                                if let Err(e) = result {
+                                    log::error!("Failed to send now playing after retries: {}", e);
+                                }
+                            }
+                        });
+                    }
 
-                        // Enrichment is async now, scrobble with what we have
-                        // (enrichment helps with better metadata but doesn't block scrobbling)
+                    // Update the "Love" button state.
+                    if !should_scrobble {
+                        // This is an Idagio track, which is not scrobbled.
+                        if let Err(e) = tray.set_love_button_state("Idagio - cannot be scrobbled", false) {
+                            log::error!("Failed to update love button state: {}", e);
+                        }
+                    } else {
+                        // For scrobble-able tracks, reset the button to its default state
+                        // while we check the loved status asynchronously.
+                        let _ = tray.set_love_button_state("🤍 Love", true);
 
-                        for scrobbler in &scrobblers {
-                            // Skip ListenBrainz for classical music (it requires exact MBID matches)
-                            // Classical music submissions will only go to Last.fm
+                        // Asynchronously check if the track is loved on Last.fm
+                        if let Some(ref lastfm_config) = config.lastfm {
+                            if !lastfm_config.session_key.is_empty() {
+                                let track_clone = track.clone();
+                                let api_key = lastfm_config.api_key.clone();
+                                let api_secret = lastfm_config.api_secret.clone();
+                                let session_key = lastfm_config.session_key.clone();
+                                let event_proxy = elwt.create_proxy();
+
+                                std::thread::spawn(move || {
+                                    if let Ok(is_loved) = lastfm_is_loved(&track_clone, &api_key, &api_secret, &session_key) {
+                                        let _ = event_proxy.send_event(UserEvent::LoveStatusUpdated(is_loved));
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // Handle scrobble event
+                if let Some((track, timestamp, ref bundle_id)) = events.scrobble {
+                    log::info!(
+                        "Scrobble: {} - {} at {} from {:?}",
+                        track.artist,
+                        track.title,
+                        timestamp.format("%Y-%m-%d %H:%M:%S"),
+                        bundle_id
+                    );
+
+                    let scrobblers = Arc::clone(&scrobblers);
+                    let track_clone = track.clone();
+                    std::thread::spawn(move || {
+                        for scrobbler in scrobblers.lock().unwrap().iter() {
                             if let Service::ListenBrainz { name, .. } = scrobbler {
-                                // Classical music typically has empty initial artist or composer in artist field
-                                // ListenBrainz requires strict MBID matching, so skip for safety
-                                if track.artist.is_empty() || track.artist.len() < 3 {
+                                if track_clone.artist.is_empty() || track_clone.artist.len() < 3 {
                                     log::debug!(
-                                        "Skipping ListenBrainz ({}): artist '{}' too short/unclear (classical music?)",
+                                        "Skipping ListenBrainz ({}): artist '{}' too short",
                                         name,
-                                        track.artist
+                                        track_clone.artist
                                     );
                                     continue;
                                 }
@@ -432,64 +519,66 @@ fn main() -> Result<()> {
                                 max_elapsed_time: Some(Duration::from_secs(10)),
                                 ..Default::default()
                             };
-
                             let result = retry(backoff, || {
                                 scrobbler
-                                    .scrobble(&track, timestamp)
+                                    .scrobble(&track_clone, timestamp)
                                     .map_err(backoff::Error::transient)
                             });
-
                             if let Err(e) = result {
                                 log::error!("Failed to scrobble after retries: {}", e);
                             }
                         }
+                    });
 
-                        let track_str = format!("{} - {}", track.artist, track.title);
-                        if let Err(e) = tray.update_last_scrobbled(Some(track_str)) {
-                            log::error!("Failed to update tray last scrobbled: {}", e);
-                        }
-                    }
-
-                    // Handle unknown app event (blocking dialog)
-                    if let Some(ref bundle_id) = events.unknown_app {
-                        use ui::app_dialog::{show_app_prompt, AppChoice};
-
-                        log::info!("Prompting user for app: {}", bundle_id);
-                        let choice = show_app_prompt(bundle_id);
-
-                        match choice {
-                            AppChoice::Allow => {
-                                log::info!("User allowed app: {}", bundle_id);
-                                if !config.app_filtering.allowed_apps.contains(bundle_id) {
-                                    config.app_filtering.allowed_apps.push(bundle_id.clone());
-                                    if let Err(e) = config.save() {
-                                        log::error!("Failed to save config: {}", e);
-                                    } else {
-                                        log::info!("Added {} to allowed apps", bundle_id);
-                                    }
-                                }
-                            }
-                            AppChoice::Ignore => {
-                                log::info!("User ignored app: {}", bundle_id);
-                                if !config.app_filtering.ignored_apps.contains(bundle_id) {
-                                    config.app_filtering.ignored_apps.push(bundle_id.clone());
-                                    if let Err(e) = config.save() {
-                                        log::error!("Failed to save config: {}", e);
-                                    } else {
-                                        log::info!("Added {} to ignored apps", bundle_id);
-                                    }
-                                }
-                            }
-                        }
+                    let track_str = format!("{} - {}", track.artist, track.title);
+                    if let Err(e) = tray.update_last_scrobbled(Some(track_str)) {
+                        log::error!("Failed to update tray last scrobbled: {}", e);
                     }
                 }
-                Err(e) => {
-                    log::error!("Error polling media: {}", e);
+
+                // Handle unknown app event
+                if let Some(ref bundle_id) = events.unknown_app {
+                    use ui::app_dialog::{show_app_prompt, AppChoice};
+
+                    log::info!("Prompting user for app: {}", bundle_id);
+                    let choice = show_app_prompt(bundle_id);
+
+                    match choice {
+                        AppChoice::Allow => {
+                            log::info!("User allowed app: {}", bundle_id);
+                            if !config.app_filtering.allowed_apps.contains(bundle_id) {
+                                config.app_filtering.allowed_apps.push(bundle_id.clone());
+                                if let Err(e) = config.save() {
+                                    log::error!("Failed to save config: {}", e);
+                                } else {
+                                    log::info!("Added {} to allowed apps", bundle_id);
+                                }
+                            }
+                        }
+                        AppChoice::Ignore => {
+                            log::info!("User ignored app: {}", bundle_id);
+                            if !config.app_filtering.ignored_apps.contains(bundle_id) {
+                                config.app_filtering.ignored_apps.push(bundle_id.clone());
+                                if let Err(e) = config.save() {
+                                    log::error!("Failed to save config: {}", e);
+                                } else {
+                                    log::info!("Added {} to ignored apps", bundle_id);
+                                }
+                            }
+                        }
+                    }
                 }
             }
+            Err(e) => {
+                log::error!("Error processing media state: {}", e);
+            }
+        }
 
-            // Schedule next poll
-            next_poll_time = now + refresh_interval;
+        // Set control flow: sleep until scrobble deadline, or wait indefinitely
+        if let Some(deadline) = media_monitor.next_scrobble_deadline() {
+            elwt.set_control_flow(ControlFlow::WaitUntil(deadline));
+        } else {
+            elwt.set_control_flow(ControlFlow::Wait);
         }
     })?;
 
@@ -630,8 +719,10 @@ fn create_app_icon(resources_dir: &std::path::Path) -> Result<()> {
     use std::path::Path;
 
     // Path to the source icon in the project resources
-    let source_icon =
-        concat!(env!("CARGO_MANIFEST_DIR"), "/resources/UniversalScrobbler.icns");
+    let source_icon = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/resources/UniversalScrobbler.icns"
+    );
 
     if !Path::new(source_icon).exists() {
         log::warn!(
@@ -645,8 +736,7 @@ fn create_app_icon(resources_dir: &std::path::Path) -> Result<()> {
     let dest_icon = resources_dir.join(ICON_FILENAME);
 
     // Copy the .icns file for the app icon
-    fs::copy(source_icon, &dest_icon)
-        .context("Failed to copy icon file to app bundle")?;
+    fs::copy(source_icon, &dest_icon).context("Failed to copy icon file to app bundle")?;
 
     log::info!(
         "Copied app icon from {} to {}",

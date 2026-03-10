@@ -101,32 +101,14 @@ pub fn parse_classical_metadata(artist: &str, title: &str) -> (String, String, O
             clean_title
         };
 
-        log::debug!("Cleaned IDAGIO title: {:?}, UPC: {:?}", clean_title, upc);
+        log::debug!("Cleaned IDAGIO title (album name): {:?}, UPC: {:?}", clean_title, upc);
 
-        // Look for "by [Composer Name]" pattern
-        if let Some(by_pos) = clean_title.find(" by ") {
-            log::debug!("Found ' by ' pattern in title");
-            let before_by = &clean_title[..by_pos];
-            let after_by = &clean_title[by_pos + 4..]; // Skip " by "
-
-            // Extract composer (text before any additional markers)
-            let composer = after_by.trim();
-
-            let result = (composer.to_string(), before_by.trim().to_string(), upc);
-            log::debug!(
-                "Parsed classical metadata (by pattern) - artist: {:?}, title: {:?}, upc: {:?}",
-                result.0,
-                result.1,
-                result.2
-            );
-            return result;
-        } else {
-            // No "by" pattern: treat clean title as the piece name, keep artist empty
-            // This allows MusicBrainz enrichment to work with just title + duration
-            log::debug!("No ' by ' pattern found - using title as piece: {:?}", clean_title);
-            let result = ("".to_string(), clean_title, upc);
-            return result;
-        }
+        // For Idagio, the cleaned title is the album name. We use this for the track title
+        // and keep the artist empty, as requested. This is for display only and will not
+        // be scrobbled.
+        let result = ("".to_string(), clean_title, upc);
+        log::debug!("Final parsed Idagio data: artist: '{}', title: '{}'", result.0, result.1);
+        return result;
     } else {
         log::debug!("Artist is not empty, skipping classical parsing");
     }
@@ -248,8 +230,8 @@ mod tests {
             "",
             " - Canon and Gigue in D major P 37 by Johann Pachelbel | Stream on IDAGIO | IDAGIO",
         );
-        assert_eq!(artist, "Johann Pachelbel");
-        assert_eq!(title, "Canon and Gigue in D major P 37");
+        assert_eq!(artist, "");
+        assert_eq!(title, "Canon and Gigue in D major P 37 by Johann Pachelbel");
         assert_eq!(upc, None);
     }
 

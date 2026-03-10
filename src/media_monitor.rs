@@ -1,14 +1,13 @@
 // Media monitoring module
-// Polls macOS media remote for now playing information
+// Snapshot-driven state machine for tracking media playback and scrobbling
 
 use crate::config::AppFilteringConfig;
 use crate::scrobbler::Track;
 use crate::text_cleanup::TextCleaner;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use media_remote::prelude::*;
 use media_remote::NowPlayingInfo;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const MIN_TRACK_DURATION: u64 = 30; // Minimum track duration in seconds to scrobble
 const SCROBBLE_TIME_THRESHOLD: u64 = 240; // 4 minutes in seconds
@@ -26,10 +25,16 @@ enum AppFilterAction {
 struct PlaySession {
     track: Track,
     bundle_id: Option<String>,
-    started_at: DateTime<Utc>,
-    duration: u64, // Track duration in seconds
+    started_at_utc: DateTime<Utc>,
+    duration: u64,
     scrobbled: bool,
     now_playing_sent: bool,
+    /// Last known elapsed time from the media player (seconds)
+    elapsed_secs: u64,
+    is_playing: bool,
+    /// When we last updated elapsed_secs from a snapshot
+    last_snapshot_at: Instant,
+    scrobble_allowed: bool,
 }
 
 impl PlaySession {
@@ -37,52 +42,67 @@ impl PlaySession {
         track: Track,
         bundle_id: Option<String>,
         duration: u64,
+        elapsed: f64,
+        is_playing: bool,
+        scrobble_allowed: bool,
     ) -> Self {
         Self {
             track,
             bundle_id,
-            started_at: Utc::now(),
+            started_at_utc: Utc::now(),
             duration,
             scrobbled: false,
             now_playing_sent: false,
+            elapsed_secs: elapsed as u64,
+            is_playing,
+            last_snapshot_at: Instant::now(),
+            scrobble_allowed,
         }
     }
 
-    /// Calculate elapsed play time in seconds
-    fn elapsed_seconds(&self) -> u64 {
-        let elapsed = Utc::now().signed_duration_since(self.started_at);
-        elapsed.num_seconds().max(0) as u64
+    /// Update play state from a new snapshot
+    fn update_from_snapshot(&mut self, elapsed: f64, is_playing: bool) {
+        self.elapsed_secs = elapsed as u64;
+        self.is_playing = is_playing;
+        self.last_snapshot_at = Instant::now();
     }
 
-    /// Check if track should be scrobbled based on Last.fm rules
-    fn should_scrobble(&self, threshold_percent: u8) -> bool {
-        if self.scrobbled {
-            return false;
+    /// Current played time, extrapolating from last snapshot if still playing
+    fn played_seconds(&self) -> u64 {
+        if self.is_playing {
+            let since_snapshot = self.last_snapshot_at.elapsed().as_secs();
+            self.elapsed_secs + since_snapshot
+        } else {
+            self.elapsed_secs
         }
+    }
 
-        // Track must be at least 30 seconds long
-        if self.duration < MIN_TRACK_DURATION {
-            return false;
+    /// Time needed to reach scrobble threshold
+    fn scrobble_at(&self, threshold_percent: u8) -> Option<u64> {
+        if self.scrobbled || self.duration < MIN_TRACK_DURATION {
+            return None;
         }
-
-        let elapsed = self.elapsed_seconds();
-
-        // Scrobble after 50% (configurable) of the track OR 4 minutes, whichever comes first
         let threshold_time = (self.duration * threshold_percent as u64) / 100;
-        let scrobble_at = threshold_time.min(SCROBBLE_TIME_THRESHOLD);
-
-        elapsed >= scrobble_at
+        Some(threshold_time.min(SCROBBLE_TIME_THRESHOLD))
     }
 
-    /// Check if we should send "now playing" update
+    fn should_scrobble(&self, threshold_percent: u8) -> bool {
+        if !self.scrobble_allowed {
+            return false;
+        }
+        match self.scrobble_at(threshold_percent) {
+            Some(target) => self.played_seconds() >= target,
+            None => false,
+        }
+    }
+
     fn should_send_now_playing(&self) -> bool {
         !self.now_playing_sent
     }
 }
 
-/// Media monitor that polls macOS media remote
+/// Media monitor that processes snapshots of now-playing state
 pub struct MediaMonitor {
-    now_playing: NowPlayingJXA,
     scrobble_threshold: u8,
     current_session: Option<PlaySession>,
     text_cleaner: TextCleaner,
@@ -91,7 +111,6 @@ pub struct MediaMonitor {
 impl MediaMonitor {
     pub fn new(scrobble_threshold: u8, text_cleaner: TextCleaner) -> Self {
         Self {
-            now_playing: NowPlayingJXA::new(Duration::from_secs(30)),
             scrobble_threshold,
             current_session: None,
             text_cleaner,
@@ -106,7 +125,6 @@ impl MediaMonitor {
     ) -> AppFilterAction {
         match bundle_id {
             None => {
-                // No bundle ID - use scrobble_unknown setting
                 if app_filtering.scrobble_unknown {
                     AppFilterAction::Allow
                 } else {
@@ -114,7 +132,6 @@ impl MediaMonitor {
                 }
             }
             Some(id) if id.is_empty() => {
-                // Empty bundle ID - treat as None
                 if app_filtering.scrobble_unknown {
                     AppFilterAction::Allow
                 } else {
@@ -122,19 +139,15 @@ impl MediaMonitor {
                 }
             }
             Some(id) => {
-                // Check allowed list first
                 if app_filtering.allowed_apps.contains(id) {
                     return AppFilterAction::Allow;
                 }
-                // Check ignored list
                 if app_filtering.ignored_apps.contains(id) {
                     return AppFilterAction::Ignore;
                 }
-                // Unknown app - prompt if enabled
                 if app_filtering.prompt_for_new_apps {
                     AppFilterAction::PromptUser
                 } else {
-                    // Don't prompt, default to allowing
                     AppFilterAction::Allow
                 }
             }
@@ -142,8 +155,8 @@ impl MediaMonitor {
     }
 
     /// Convert media_remote NowPlayingInfo to our Track structure
-    /// Only applies IDAGIO-specific metadata parsing if IDAGIO markers are found in the metadata
-    fn media_info_to_track(&self, info: &NowPlayingInfo) -> Option<Track> {
+    /// Only applies IDAGIO-specific metadata parsing if IDAGIO markers are found
+    fn media_info_to_track(&self, info: &NowPlayingInfo) -> Option<(Track, bool)> {
         let title = info.title.clone()?;
         let artist = info.artist.clone()?;
         let album = info.album.clone();
@@ -157,81 +170,96 @@ impl MediaMonitor {
 
         // Detect IDAGIO by presence of "IDAGIO" in metadata (brand-specific marker)
         // IDAGIO is not an English word, so its presence indicates IDAGIO source
-        let is_idagio = title.contains("IDAGIO") || artist.contains("IDAGIO") 
-                     || album.as_ref().map_or(false, |a| a.contains("IDAGIO"));
-        
-        let (parsed_artist, parsed_title, upc) = if is_idagio && artist.trim().is_empty() {
-            // IDAGIO track with empty artist: apply classical metadata parsing
-            log::info!("== IDAGIO Classical Track Processing == (empty artist detected)");
-            let result = crate::text_cleanup::parse_classical_metadata(&artist, &title);
-            log::debug!(
-                "Parsed classical metadata: artist=\"{}\" title=\"{}\" upc={:?}",
-                result.0, result.1, result.2
-            );
-            result
-        } else {
-            // Non-IDAGIO tracks or IDAGIO with valid artist: use as-is
-            // This preserves artist metadata from other sources (Yandex, Spotify, etc.)
-            (artist.clone(), title.clone(), None)
-        };
+        let is_idagio = title.contains("IDAGIO")
+            || artist.contains("IDAGIO")
+            || album.as_ref().is_some_and(|a| a.contains("IDAGIO"));
 
-        // Apply text cleanup only for IDAGIO tracks that were parsed
-        let (artist, title, mut album) = if is_idagio {
-            let title = self.text_cleaner.clean(&parsed_title);
-            let artist = self.text_cleaner.clean(&parsed_artist);
-            let album = self.text_cleaner.clean_option(album);
-            log::debug!(
-                "Applied text cleanup: artist=\"{}\" title=\"{}\" album={:?}",
-                artist, title, album
-            );
-            (artist, title, album)
-        } else {
-            // Non-IDAGIO sources have clean metadata, skip text cleanup
-            (parsed_artist, parsed_title, album)
-        };
+        if is_idagio {
+            // IDAGIO path: Clean up for display, but DISABLE scrobbling
+            let (parsed_artist, parsed_title, upc) = if artist.trim().is_empty() {
+                crate::text_cleanup::parse_classical_metadata(&artist, &title)
+            } else {
+                (artist.clone(), title.clone(), None)
+            };
 
-        // For IDAGIO: if no artist and no album, the title IS the album name
-        // Set album = title so enricher can match tracks
-        if is_idagio && artist.is_empty() && album.is_none() && !title.is_empty() {
-            log::debug!("IDAGIO-style track: using title as album for enrichment");
-            album = Some(title.clone());
+            let clean_artist = self.text_cleaner.clean(&parsed_artist);
+            let clean_title = self.text_cleaner.clean(&parsed_title);
+            let mut clean_album = self.text_cleaner.clean_option(album);
+
+            if clean_album.is_none() && !clean_title.is_empty() {
+                clean_album = Some(clean_title.clone());
+            }
+
+            let track = Track {
+                title: clean_title,
+                artist: clean_artist,
+                album: clean_album,
+                duration: info.duration.map(|d| d as u64),
+                upc,
+                lastfm_album_art_url: None,
+            };
+
+            Some((track, false))
+        } else {
+            // Generic path: Standard processing, scrobbling enabled
+            let mut final_artist = artist;
+            let mut final_title = title;
+
+            // Handle cases like Yandex where artist is empty and title is "Artist - Title"
+            // This is explicitly NOT done for Idagio tracks.
+            if final_artist.trim().is_empty() && !final_title.is_empty() {
+                if let Some(pos) = final_title.find(" - ") {
+                    let (possible_artist, possible_title) = final_title.split_at(pos);
+                    let possible_title = &possible_title[3..]; // Skip " - "
+                    if !possible_artist.is_empty() && !possible_title.is_empty() {
+                        final_artist = possible_artist.to_string();
+                        final_title = possible_title.to_string();
+                    }
+                }
+            }
+
+            let clean_artist = self.text_cleaner.clean(&final_artist);
+            let clean_title = self.text_cleaner.clean(&final_title);
+            let clean_album = self.text_cleaner.clean_option(album);
+
+            let track = Track {
+                title: clean_title,
+                artist: clean_artist,
+                album: clean_album,
+                duration: info.duration.map(|d| d as u64),
+                upc: None,
+                lastfm_album_art_url: None,
+            };
+
+            Some((track, true))
         }
-
-        Some(Track {
-            title,
-            artist,
-            album,
-            duration: info.duration.map(|d| d as u64),
-            upc,
-            lastfm_album_art_url: None,
-        })
     }
 
-    /// Check for track changes and return events (now playing, scrobble)
-    pub fn poll(&mut self, app_filtering: &AppFilteringConfig) -> Result<MediaEvents> {
-        // Clone media info to avoid holding the guard
-        let media_info = {
-            let guard = self.now_playing.get_info();
-            guard.as_ref().cloned()
-        };
-
+    /// Process a snapshot of now-playing info and return events
+    pub fn handle_media_change(
+        &mut self,
+        info: Option<NowPlayingInfo>,
+        app_filtering: &AppFilteringConfig,
+    ) -> Result<MediaEvents> {
         let mut events = MediaEvents::default();
 
-        if let Some(info) = media_info {
-            // Check if media is playing (not paused)
+        if let Some(info) = info {
             let is_playing = info.is_playing.unwrap_or(false);
+            let elapsed = info.elapsed_time.unwrap_or(0.0);
 
-            if !is_playing {
-                // Media is paused or stopped - don't start new session
-                // but keep existing session in case playback resumes
-                return Ok(events);
-            }
             log::debug!(
-                "now playing info: title={:?}, artist={:?}, album={:?}, duration={:?}, is_playing={}, bundle={:?}",
-                info.title, info.artist, info.album, info.duration, info.is_playing.unwrap_or(false), info.bundle_id
+                "now playing info: title={:?}, artist={:?}, album={:?}, \
+                 duration={:?}, elapsed={:.0}s, is_playing={}, bundle={:?}",
+                info.title,
+                info.artist,
+                info.album,
+                info.duration,
+                elapsed,
+                is_playing,
+                info.bundle_id
             );
 
-            if let Some(track) = self.media_info_to_track(&info) {
+            if let Some((track, scrobble_allowed)) = self.media_info_to_track(&info) {
                 let duration = track.duration.unwrap_or(0);
                 let bundle_id = info.bundle_id.clone();
 
@@ -242,67 +270,64 @@ impl MediaMonitor {
                         return Ok(events);
                     }
                     AppFilterAction::PromptUser => {
-                        // Emit event to prompt user
                         if let Some(ref id) = bundle_id {
                             events.unknown_app = Some(id.clone());
                         }
                         return Ok(events);
                     }
-                    AppFilterAction::Allow => {
-                        // Continue with normal processing
-                    }
+                    AppFilterAction::Allow => {}
                 }
 
                 // Check if this is a new track or continuation
                 let is_new_track = match &self.current_session {
                     None => true,
-                    Some(session) => {
-                        // Check if track changed (only compare track metadata, not update time)
-                        session.track != track
-                    }
+                    Some(session) => session.track != track,
                 };
 
                 if is_new_track {
-                    // New track started
                     log::info!(
-                        "New track: {} - {} ({}s) from {:?}",
+                        "New track: {} - {} ({}s, {:.0}s in) from {:?}",
                         track.artist,
                         track.title,
                         duration,
+                        elapsed,
                         bundle_id
                     );
 
-                    let mut new_session = PlaySession::new(
+                    let mut session = PlaySession::new(
                         track.clone(),
                         bundle_id.clone(),
                         duration,
+                        elapsed,
+                        is_playing,
+                        scrobble_allowed,
                     );
-                    new_session.now_playing_sent = true; // Mark as sent immediately
-                    self.current_session = Some(new_session);
-
-                    // Send now playing update
-                    events.now_playing = Some((track, bundle_id));
+                    session.now_playing_sent = true;
+                    self.current_session = Some(session);
+                    events.now_playing = Some((track, bundle_id, scrobble_allowed));
                 } else if let Some(session) = self.current_session.as_mut() {
-                    // Same track, check if we should scrobble
+                    // Same track — update elapsed time from snapshot
+                    session.update_from_snapshot(elapsed, is_playing);
+
+                    // Check scrobble eligibility
                     if session.should_scrobble(self.scrobble_threshold) {
                         log::info!(
                             "Scrobbling: {} - {} (played {}s / {}s)",
                             session.track.artist,
                             session.track.title,
-                            session.elapsed_seconds(),
+                            session.played_seconds(),
                             session.duration
                         );
 
                         events.scrobble = Some((
                             session.track.clone(),
-                            session.started_at,
+                            session.started_at_utc,
                             session.bundle_id.clone(),
                         ));
                         session.scrobbled = true;
                     } else if session.should_send_now_playing() {
-                        // Send now playing update if not sent yet
                         events.now_playing =
-                            Some((session.track.clone(), session.bundle_id.clone()));
+                            Some((session.track.clone(), session.bundle_id.clone(), session.scrobble_allowed));
                         session.now_playing_sent = true;
                     }
                 }
@@ -317,12 +342,56 @@ impl MediaMonitor {
 
         Ok(events)
     }
+
+    /// Check if the current session should scrobble (timer-driven)
+    pub fn check_scrobble(&mut self) -> Result<MediaEvents> {
+        let mut events = MediaEvents::default();
+
+        if let Some(session) = self.current_session.as_mut() {
+            if session.should_scrobble(self.scrobble_threshold) {
+                log::info!(
+                    "Scrobbling (deadline): {} - {} (played {}s / {}s)",
+                    session.track.artist,
+                    session.track.title,
+                    session.played_seconds(),
+                    session.duration
+                );
+
+                events.scrobble = Some((
+                    session.track.clone(),
+                    session.started_at_utc,
+                    session.bundle_id.clone(),
+                ));
+                session.scrobbled = true;
+            }
+        }
+
+        Ok(events)
+    }
+
+    /// Returns when the next scrobble check should happen
+    pub fn next_scrobble_deadline(&self) -> Option<Instant> {
+        let session = self.current_session.as_ref()?;
+        if !session.is_playing {
+            return None;
+        }
+
+        let scrobble_at = session.scrobble_at(self.scrobble_threshold)?;
+        let played = session.played_seconds();
+
+        if played >= scrobble_at {
+            return Some(Instant::now());
+        }
+
+        let remaining = scrobble_at - played;
+        Some(Instant::now() + Duration::from_secs(remaining))
+    }
 }
 
 /// Events generated by media monitoring
 #[derive(Debug, Default)]
 pub struct MediaEvents {
-    pub now_playing: Option<(Track, Option<String>)>,
+    pub now_playing: Option<(Track, Option<String>, bool)>,
     pub scrobble: Option<(Track, DateTime<Utc>, Option<String>)>,
     pub unknown_app: Option<String>,
 }

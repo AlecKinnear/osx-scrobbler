@@ -103,6 +103,42 @@ impl Track {
     }
 }
 
+/// Check if a track is loved on Last.fm by calling the API.
+/// This is a standalone function to allow calling it from a background thread
+/// without needing to pass a non-Send Scrobbler instance.
+pub fn lastfm_is_loved(track: &Track, api_key: &str, api_secret: &str, session_key: &str) -> Result<bool> {
+    // Call Last.fm track.getInfo API with username parameter
+    let sig_string = format!(
+        "api_key{}artist{}methodtrack.getInfosk{}track{}{}",
+        api_key, &track.artist, session_key, &track.title, api_secret
+    );
+    let signature = format!("{:x}", md5::compute(sig_string.as_bytes()));
+
+    let body = format!(
+        "method=track.getInfo&api_key={}&artist={}&track={}&sk={}&api_sig={}",
+        api_key,
+        urlencoding::encode(&track.artist),
+        urlencoding::encode(&track.title),
+        session_key,
+        signature
+    );
+
+    let response = attohttpc::post("https://ws.audioscrobbler.com/2.0/")
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .text(body)
+        .send()
+        .context("Failed to get track info from Last.fm")?;
+
+    if !response.is_success() {
+        log::warn!("Last.fm API error: {}", response.status());
+        return Ok(false);
+    }
+
+    let response_text = response.text().unwrap_or_default();
+    // Check if the response contains <userloved>1</userloved>
+    Ok(response_text.contains("<userloved>1</userloved>"))
+}
+
 /// Scrobbling service
 pub enum Service {
     LastFm(LastFmScrobbler),
@@ -161,32 +197,8 @@ impl Service {
     pub fn is_loved(&self, track: &Track, api_key: &str, api_secret: &str, session_key: &str) -> Result<bool> {
         match self {
             Self::LastFm(_) => {
-                // Call Last.fm track.getInfo API with username parameter
-                let sig_string = format!(
-                    "api_key{}artist{}methodtrack.getInfosk{}track{}{}",
-                    api_key, &track.artist, session_key, &track.title, api_secret
-                );
-                let signature = format!("{:x}", md5::compute(sig_string.as_bytes()));
-
-                let body = format!(
-                    "method=track.getInfo&api_key={}&artist={}&track={}&sk={}&api_sig={}",
-                    api_key, &track.artist, &track.title, session_key, signature
-                );
-
-                let response = attohttpc::post("https://ws.audioscrobbler.com/2.0/")
-                    .header("Content-Type", "application/x-www-form-urlencoded")
-                    .text(body)
-                    .send()
-                    .context("Failed to get track info from Last.fm")?;
-
-                if !response.is_success() {
-                    log::warn!("Last.fm API error: {}", response.status());
-                    return Ok(false);
-                }
-
-                let response_text = response.text().unwrap_or_default();
-                // Check if the response contains <userloved>1</userloved>
-                Ok(response_text.contains("<userloved>1</userloved>"))
+                // Delegate to the standalone, thread-safe function
+                lastfm_is_loved(track, api_key, api_secret, session_key)
             }
             Self::ListenBrainz { .. } => {
                 // ListenBrainz doesn't provide loved status, assume not loved

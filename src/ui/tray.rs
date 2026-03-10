@@ -112,14 +112,10 @@ impl TrayManager {
         self.state.now_playing.clone()
     }
 
-    /// Update love button status
-    pub fn update_love_status(&mut self, is_loved: bool) -> Result<()> {
-        let text = if is_loved {
-            "♥️ Loved"
-        } else {
-            "🤍 Love"
-        };
+    /// Set custom text and enabled state for the love button
+    pub fn set_love_button_state(&mut self, text: &str, enabled: bool) -> Result<()> {
         self.love_item.set_text(text);
+        self.love_item.set_enabled(enabled);
         Ok(())
     }
 
@@ -133,10 +129,6 @@ impl TrayManager {
 
         self.now_playing_item.set_text(text);
         self.state.now_playing = track.clone();
-
-        // Enable/disable love button based on whether there's a track
-        let is_track_playing = track.is_some();
-        self.love_item.set_enabled(is_track_playing);
 
         Ok(())
     }

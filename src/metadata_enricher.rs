@@ -136,12 +136,18 @@ pub fn fetch_lastfm_album_art(artist: &str, album: &str, api_key: &str) -> Resul
     );
 
     let response = attohttpc::get(&url)
-        .header("User-Agent", "OSX-Scrobbler/0.3.4 ( https://github.com/aleckinnear/osx-scrobbler )")
+        .header(
+            "User-Agent",
+            "OSX-Scrobbler/0.3.4 ( https://github.com/aleckinnear/osx-scrobbler )",
+        )
         .send()
         .context("Failed to query Last.fm album API")?;
 
     if !response.is_success() {
-        log::debug!("Last.fm album.getinfo returned status: {}", response.status());
+        log::debug!(
+            "Last.fm album.getinfo returned status: {}",
+            response.status()
+        );
         // Cache the miss
         {
             let mut cache = LASTFM_ART_CACHE.lock().expect("Cache lock poisoned");
@@ -200,10 +206,7 @@ pub fn fetch_lastfm_album_art(artist: &str, album: &str, api_key: &str) -> Resul
 }
 
 /// Helper to cache and return a value
-fn return_and_cache(
-    key: (String, String),
-    value: Option<String>,
-) -> Result<()> {
+fn return_and_cache(key: (String, String), value: Option<String>) -> Result<()> {
     let mut cache = LASTFM_ART_CACHE.lock().expect("Cache lock poisoned");
     cache.insert(key, value);
     Ok(())
@@ -211,7 +214,10 @@ fn return_and_cache(
 
 /// Enrich Idagio track with artist and track name from Idagio album page
 /// Uses Bing to search for the album page, then calls Idagio API
-pub fn enrich_idagio_track(track: &mut Track, config: Option<&crate::config::Config>) -> Result<()> {
+pub fn enrich_idagio_track(
+    track: &mut Track,
+    config: Option<&crate::config::Config>,
+) -> Result<()> {
     let catalog_id = match &track.upc {
         Some(id) if !id.is_empty() => id,
         _ => {
@@ -236,14 +242,17 @@ pub fn enrich_idagio_track(track: &mut Track, config: Option<&crate::config::Con
                 log::debug!("Idagio enrichment: not enabled or no bearer token configured");
                 return Ok(());
             }
-        }
+        },
         None => {
             log::debug!("Idagio enrichment: no config available");
             return Ok(());
         }
     };
 
-    log::info!("  Attempting Idagio enrichment: catalog_id=\"{}\"", catalog_id);
+    log::info!(
+        "  Attempting Idagio enrichment: catalog_id=\"{}\"",
+        catalog_id
+    );
 
     // Search for the Idagio album page using Bing
     let album_url = match search_idagio_album_page(catalog_id) {
@@ -291,7 +300,7 @@ pub fn enrich_idagio_track(track: &mut Track, config: Option<&crate::config::Con
 fn search_idagio_album_page(catalog_id: &str) -> Result<Option<String>> {
     // Search for catalog ID in page title - IDAGIO albums have their catalog ID in the title
     let query = format!("site:idagio.com intitle:{}", catalog_id);
-    
+
     let url = format!(
         "{}?q={}&format=json",
         SEARXNG_INSTANCE,
@@ -301,7 +310,10 @@ fn search_idagio_album_page(catalog_id: &str) -> Result<Option<String>> {
     log::debug!("Searching for IDAGIO catalog: {}", catalog_id);
 
     let response = attohttpc::get(&url)
-        .header("User-Agent", "OSX-Scrobbler/0.3.4 ( https://github.com/aleckinnear/osx-scrobbler )")
+        .header(
+            "User-Agent",
+            "OSX-Scrobbler/0.3.4 ( https://github.com/aleckinnear/osx-scrobbler )",
+        )
         .send()
         .context("Failed to query search engine")?;
 
@@ -348,42 +360,45 @@ fn fetch_and_parse_idagio_album(
     // Format: https://app.idagio.com/albums/{name}-{uuid}
     // We need the last component which is the album identifier
     let album_id = url
-        .split('/').last()
+        .split('/')
+        .last()
         .context("Failed to extract album ID from URL")?;
-    
+
     log::debug!("Extracted album ID from URL: {}", album_id);
-    
+
     // Call Idagio API to get album metadata
     // API endpoint: https://api.idagio.com/v2.0/metadata/albums/{album_id}
     let api_url = format!("https://api.idagio.com/v2.0/metadata/albums/{}", album_id);
-    
+
     let response = attohttpc::get(&api_url)
         .header("Authorization", &format!("Bearer {}", bearer_token))
         .header("User-Agent", "OSX-Scrobbler/0.3.4")
         .send()
         .context("Failed to query Idagio API")?;
-    
+
     if response.status() == 401 {
         return Err(anyhow::anyhow!(
             "Idagio API authentication failed (401). Bearer token may be expired. \
             Please update the bearer_token in your config file at ~/.config/osx_scrobbler.conf"
         ));
     }
-    
+
     if !response.is_success() {
         log::debug!("Idagio API returned status: {}", response.status());
         return Ok(None);
     }
-    
+
     // Parse the response - should be JSON with album metadata
-    let body = response.text().context("Failed to read Idagio API response")?;
-    
+    let body = response
+        .text()
+        .context("Failed to read Idagio API response")?;
+
     log::debug!("Received Idagio API response, length: {} bytes", body.len());
-    
+
     // Parse JSON and extract recordings
-    let album_response: IdagioAlbumResponse = serde_json::from_str(&body)
-        .context("Failed to parse Idagio API response as JSON")?;
-    
+    let album_response: IdagioAlbumResponse =
+        serde_json::from_str(&body).context("Failed to parse Idagio API response as JSON")?;
+
     let album = match album_response.result {
         Some(a) => a,
         None => {
@@ -391,42 +406,41 @@ fn fetch_and_parse_idagio_album(
             return Ok(None);
         }
     };
-    
+
     // Match track by duration (with 3-second tolerance)
     let duration_ms = duration_secs * 1000;
-    
+
     for track in album.tracks {
         if let Some(track_duration_ms) = track.duration {
             let duration_diff = (track_duration_ms as i64 - duration_ms as i64).abs() as u64;
-            
+
             if duration_diff <= DURATION_TOLERANCE_MS {
                 // Found matching track by duration
                 // Extract title from piece
-                let title = track.piece
+                let title = track
+                    .piece
                     .as_ref()
                     .and_then(|p| p.title.as_ref())
                     .cloned()
                     .unwrap_or_default();
-                
+
                 if title.is_empty() {
                     continue;
                 }
-                
+
                 // Extract artist - prefer conductor, fallback to first ensemble
-                let artist = track.recording
+                let artist = track
+                    .recording
                     .as_ref()
                     .and_then(|r| {
                         r.conductor
                             .as_ref()
                             .and_then(|c| c.name.as_ref())
-                            .or_else(|| {
-                                r.ensembles.first()
-                                    .and_then(|e| e.name.as_ref())
-                            })
+                            .or_else(|| r.ensembles.first().and_then(|e| e.name.as_ref()))
                     })
                     .cloned()
                     .unwrap_or_default();
-                
+
                 log::debug!(
                     "Matched Idagio track: {} by {} (duration match: {}ms vs {}ms)",
                     title,
@@ -434,12 +448,12 @@ fn fetch_and_parse_idagio_album(
                     track_duration_ms,
                     duration_ms
                 );
-                
+
                 return Ok(Some((artist, title)));
             }
         }
     }
-    
+
     log::debug!(
         "No matching track found in Idagio album (duration: {}ms)",
         duration_ms
@@ -447,10 +461,12 @@ fn fetch_and_parse_idagio_album(
     Ok(None)
 }
 
-
 /// Try to enrich track with album and track name from MusicBrainz
 /// Also fetches Last.fm album art if available and Last.fm is configured
-pub fn enrich_from_musicbrainz(track: &mut Track, config: Option<&crate::config::Config>) -> Result<()> {
+pub fn enrich_from_musicbrainz(
+    track: &mut Track,
+    config: Option<&crate::config::Config>,
+) -> Result<()> {
     let duration = match track.duration {
         Some(d) => d,
         None => {
@@ -484,7 +500,6 @@ pub fn enrich_from_musicbrainz(track: &mut Track, config: Option<&crate::config:
         // Skip Idagio IDs (13 digit numeric) - they were already tried above
         // Only process 12 or 14 digit UPCs which are likely real barcodes
         if (upc.len() == 12 || upc.len() == 14) && upc.chars().all(|c| c.is_numeric()) {
-            
             log::info!("  Attempting MusicBrainz barcode lookup: UPC=\"{}\"", upc);
             match search_by_barcode_and_match_track(upc, duration) {
                 Ok(Some((album, track_title))) => {
@@ -503,7 +518,11 @@ pub fn enrich_from_musicbrainz(track: &mut Track, config: Option<&crate::config:
                         // Try to fetch Last.fm album art if Idagio art not available
                         if let Some(ref lastfm_config) = cfg.lastfm {
                             if lastfm_config.enabled {
-                                match fetch_lastfm_album_art(&track.artist, &album, &lastfm_config.api_key) {
+                                match fetch_lastfm_album_art(
+                                    &track.artist,
+                                    &album,
+                                    &lastfm_config.api_key,
+                                ) {
                                     Ok(Some(art_url)) => {
                                         track.lastfm_album_art_url = Some(art_url.clone());
                                         log::info!("  Album art (Last.fm): {}", art_url);
@@ -521,7 +540,11 @@ pub fn enrich_from_musicbrainz(track: &mut Track, config: Option<&crate::config:
                     return Ok(());
                 }
                 Ok(None) => {
-                    log::debug!("  MusicBrainz barcode lookup: no match for UPC=\"{}\" at duration={}s", upc, duration);
+                    log::debug!(
+                        "  MusicBrainz barcode lookup: no match for UPC=\"{}\" at duration={}s",
+                        upc,
+                        duration
+                    );
                 }
                 Err(e) => {
                     log::debug!("  MusicBrainz barcode lookup: FAILED - {}", e);
@@ -539,7 +562,10 @@ pub fn enrich_from_musicbrainz(track: &mut Track, config: Option<&crate::config:
         }
     };
 
-    log::info!("  Attempting MusicBrainz album name lookup: album=\"{}\"", album_name);
+    log::info!(
+        "  Attempting MusicBrainz album name lookup: album=\"{}\"",
+        album_name
+    );
     match search_album_and_match_track(&album_name, duration) {
         Ok(Some((album, track_title))) => {
             log::info!(
@@ -557,7 +583,8 @@ pub fn enrich_from_musicbrainz(track: &mut Track, config: Option<&crate::config:
                 // Try to fetch Last.fm album art if Idagio art not available
                 if let Some(ref lastfm_config) = cfg.lastfm {
                     if lastfm_config.enabled {
-                        match fetch_lastfm_album_art(&track.artist, &album, &lastfm_config.api_key) {
+                        match fetch_lastfm_album_art(&track.artist, &album, &lastfm_config.api_key)
+                        {
                             Ok(Some(art_url)) => {
                                 track.lastfm_album_art_url = Some(art_url.clone());
                                 log::info!("  Album art (Last.fm): {}", art_url);
@@ -574,7 +601,11 @@ pub fn enrich_from_musicbrainz(track: &mut Track, config: Option<&crate::config:
             }
         }
         Ok(None) => {
-            log::warn!("  MusicBrainz album lookup: no match for album=\"{}\" at duration={}s", album_name, duration);
+            log::warn!(
+                "  MusicBrainz album lookup: no match for album=\"{}\" at duration={}s",
+                album_name,
+                duration
+            );
         }
         Err(e) => {
             log::warn!("  MusicBrainz enrichment: FAILED - {}", e);
@@ -601,7 +632,10 @@ fn search_by_barcode_and_match_track(
     );
 
     let response = attohttpc::get(&url)
-        .header("User-Agent", "OSX-Scrobbler/0.3.4 ( https://github.com/aleckinnear/osx-scrobbler )")
+        .header(
+            "User-Agent",
+            "OSX-Scrobbler/0.3.4 ( https://github.com/aleckinnear/osx-scrobbler )",
+        )
         .send()
         .context("Failed to query MusicBrainz API")?;
 
@@ -667,7 +701,10 @@ fn search_album_and_match_track(
     );
 
     let response = attohttpc::get(&url)
-        .header("User-Agent", "OSX-Scrobbler/0.3.4 ( https://github.com/aleckinnear/osx-scrobbler )")
+        .header(
+            "User-Agent",
+            "OSX-Scrobbler/0.3.4 ( https://github.com/aleckinnear/osx-scrobbler )",
+        )
         .send()
         .context("Failed to query MusicBrainz API")?;
 

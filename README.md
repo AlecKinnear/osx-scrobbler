@@ -14,11 +14,11 @@ macOS Scrobbler is a native menu bar application that scrobbles your music liste
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/swift-scrobbler.git
-   cd swift-scrobbler
+   git clone https://github.com/yourusername/macos-scrobbler.git
+   cd macos-scrobbler
    ```
 
-2. Open `UniversalScrobbler.xcodeproj` in Xcode
+2. Open `UniversalScrobbler/UniversalScrobbler.xcodeproj` in Xcode
 
 3. Build and run (⌘R)
 

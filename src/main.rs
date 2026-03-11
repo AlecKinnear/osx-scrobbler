@@ -357,7 +357,7 @@ fn main() -> Result<()> {
         }
 
         // Determine what triggered this wakeup and process accordingly
-        let media_events = match event {
+        let mut media_events = match event {
             winit::event::Event::UserEvent(UserEvent::MediaStateChanged) => {
                 // Debounce: push the deadline forward on each notification so
                 // only the last event in a rapid burst triggers a snapshot.
@@ -373,12 +373,21 @@ fn main() -> Result<()> {
                     let snapshot = fetch_media_snapshot();
                     media_monitor.handle_media_change(snapshot, &config.app_filtering)
                 } else {
-                    // Scrobble deadline reached
+                    // Timer wake: check if a scrobble is due
                     media_monitor.check_scrobble()
                 }
             }
             _ => Ok(Default::default()),
         };
+
+        // If the main poll didn't generate a scrobble, check if one is due by time.
+        if let Ok(ref mut events) = media_events {
+            if events.scrobble.is_none() {
+                if let Ok(scrobble_check) = media_monitor.check_scrobble() {
+                    events.scrobble = scrobble_check.scrobble;
+                }
+            }
+        }
 
         // Process media events
         match media_events {

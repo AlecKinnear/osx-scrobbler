@@ -1,6 +1,6 @@
-# Contributing to OSX Scrobbler
+# Contributing to macOS Scrobbler
 
-Thank you for your interest in contributing to OSX Scrobbler! This document provides guidelines for contributing to the project.
+Thank you for your interest in contributing to macOS Scrobbler! This Swift/SwiftUI application welcomes contributions from the community.
 
 ## Code of Conduct
 
@@ -14,8 +14,8 @@ If you find a bug, please create an issue on GitHub with:
 - A clear, descriptive title
 - Steps to reproduce the problem
 - Expected behavior vs. actual behavior
-- Your macOS version and app version
-- Relevant log output (from `~/Library/Logs/osx-scrobbler.log`)
+- Your macOS version and Xcode version
+- Relevant log output (check Console.app for macOS Scrobbler logs)
 
 ### Suggesting Features
 
@@ -23,82 +23,86 @@ Feature suggestions are welcome! Please create an issue with:
 - A clear description of the feature
 - Why it would be useful
 - How it might work
+- Any design considerations
 
 ### Pull Requests
 
-1. **Fork the repository** and create a new branch from `master`
+1. **Fork the repository** and create a new branch from `main`
 2. **Make your changes** following the coding standards below
-3. **Add tests** if applicable (especially for new features)
-4. **Run tests** with `cargo test`
-5. **Run clippy** with `cargo clippy` and fix any warnings
-6. **Update documentation** (README.md, CHANGELOG.md) as needed
-7. **Commit your changes** with clear, descriptive commit messages
-8. **Push to your fork** and submit a pull request
+3. **Test thoroughly** on macOS 13.0+ in both light and dark modes
+4. **Update documentation** (README.md, CHANGELOG.md, inline docs) as needed
+5. **Commit your changes** with clear, descriptive commit messages
+6. **Push to your fork** and submit a pull request
 
 ## Development Setup
 
 ### Prerequisites
 
-- macOS 10.15 or later
-- Rust toolchain (install from [rustup.rs](https://rustup.rs))
+- macOS 13.0 (Ventura) or later
+- Xcode 14.0 or later
 - Git
 
 ### Building from Source
 
 ```bash
-git clone https://github.com/yourusername/osx-scrobbler.git
-cd osx-scrobbler
-cargo build
+git clone https://github.com/yourusername/swift-scrobbler.git
+cd swift-scrobbler
+open UniversalScrobbler.xcodeproj
 ```
 
-### Running Tests
+Then build and run in Xcode (⌘R).
 
-```bash
-cargo test
-```
+See [UniversalScrobbler/XCODE_SETUP.md](UniversalScrobbler/XCODE_SETUP.md) for detailed setup instructions.
 
-### Running Locally
+### Testing
 
-```bash
-cargo run
-```
-
-For debug logging:
-```bash
-RUST_LOG=debug cargo run --console
-```
+- Test all changes in both light and dark mode
+- Test with different music players (Music.app, Spotify, etc.)
+- Verify scrobbling to Last.fm and ListenBrainz
+- Test authentication flows
+- Check memory usage and performance
 
 ## Coding Standards
 
-### Style
+### Swift Style
 
-- Follow standard Rust conventions
-- Run `cargo fmt` before committing
-- Run `cargo clippy` and address all warnings
-- Keep lines under 100 characters when reasonable
+- Follow Swift API Design Guidelines
+- Use SwiftLint if available
+- Keep functions focused and concise
+- Use meaningful variable and function names
+- Prefer `let` over `var` when possible
+- Use Swift's modern concurrency features (async/await)
+
+### SwiftUI Conventions
+
+- Keep views small and focused
+- Extract reusable components
+- Use `@State`, `@Binding`, `@ObservedObject`, and `@StateObject` appropriately
+- Follow Apple's Human Interface Guidelines
+- Support both light and dark mode
+- Use system colors and standard components when possible
 
 ### Code Quality
 
-- Avoid `unwrap()` except in tests or with clear justification
-- Use `expect()` with descriptive messages when panicking is acceptable
-- Prefer `?` operator for error propagation
-- Add doc comments for public APIs
-- Write tests for new functionality
+- Avoid force unwrapping (`!`) except where absolutely safe
+- Use guard statements for early returns
+- Add comments for complex logic
+- Use proper error handling with do-catch
+- Log important events using `NSLog`
 
 ### Commit Messages
 
 - Use present tense ("Add feature" not "Added feature")
 - First line should be under 72 characters
 - Reference issues and PRs when relevant
-- Include "Co-Authored-By" if pair programming
 
 Example:
 ```
-Add support for multiple ListenBrainz instances
+Add ListenBrainz authentication UI
 
-- Allow users to configure multiple ListenBrainz endpoints
-- Add name field to distinguish between instances
-- Update config validation
+- Create authentication view similar to Last.fm
+- Add token validation
+- Update settings view layout
 
 Fixes #42
 ```
@@ -106,34 +110,84 @@ Fixes #42
 ## Project Structure
 
 ```
-src/
-├── main.rs              # Application entry point and event loop
-├── config.rs            # Configuration loading and validation
-├── media_monitor.rs     # Media player monitoring and scrobble logic
-├── scrobbler.rs         # Last.fm and ListenBrainz integrations
-├── text_cleanup.rs      # Text cleanup with regex patterns
-└── ui/
-    ├── mod.rs
-    └── tray.rs          # System tray menu implementation
+UniversalScrobbler/
+├── UniversalScrobbler.xcodeproj/
+└── UniversalScrobbler/
+    ├── App/                          # Application entry and delegate
+    │   ├── UniversalScrobblerApp.swift
+    │   ├── AppDelegate.swift
+    │   └── Info.plist
+    ├── Models/                       # Data models
+    │   ├── Track.swift
+    │   ├── Config.swift
+    │   └── ScrobbleService.swift
+    ├── Services/                     # Business logic
+    │   ├── MediaMonitor.swift
+    │   ├── LastFmService.swift
+    │   ├── ListenBrainzService.swift
+    │   ├── MetadataEnricher.swift
+    │   └── ScrobbleManager.swift
+    ├── Views/                        # SwiftUI views
+    │   ├── MenuBarView.swift
+    │   ├── SettingsView.swift
+    │   ├── LastFmAuthView.swift
+    │   ├── AlbumArtWindow.swift
+    │   └── AppPromptDialog.swift
+    ├── Utilities/                    # Helper utilities
+    │   ├── TextCleaner.swift
+    │   ├── ImageCache.swift
+    │   └── Extensions.swift
+    └── Resources/                    # Assets and resources
+        ├── Assets.xcassets/
+        └── MediaRemote.h
 ```
 
-## Testing
+## Key Areas for Contribution
 
-- Add unit tests for pure functions (see `text_cleanup.rs` for examples)
-- Test error cases, not just happy paths
-- Use descriptive test names that explain what is being tested
+### High Priority
+- ListenBrainz authentication UI (similar to Last.fm)
+- Keychain storage for session keys
+- Launch at login support
+- Additional music player support
 
-## Documentation
+### Nice to Have
+- Statistics and charts
+- Export scrobble history
+- Notification center integration
+- Keyboard shortcuts
 
-- Update README.md for user-facing changes
-- Update CHANGELOG.md following [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format
-- Add doc comments for public APIs
-- Include examples in doc comments when helpful
+### Documentation
+- Improve inline documentation
+- Add code examples
+- Create architecture diagrams
+- Write user guides
+
+## Design Guidelines
+
+- Follow macOS Human Interface Guidelines
+- Ensure all UI works in both light and dark mode
+- Use system fonts and colors
+- Keep animations subtle and purposeful
+- Maintain consistent spacing and alignment
+- Test on different screen sizes
+
+## Testing Checklist
+
+Before submitting a PR, verify:
+- [ ] Builds without warnings in Xcode
+- [ ] Works in both light and dark mode
+- [ ] No memory leaks (test with Instruments)
+- [ ] Menu bar icon displays correctly
+- [ ] Authentication flows work
+- [ ] Scrobbling works correctly
+- [ ] Settings persist correctly
+- [ ] Album art displays properly
 
 ## Questions?
 
-If you have questions about contributing, feel free to:
+If you have questions about contributing:
 - Open an issue for discussion
 - Ask in your pull request
+- Check existing documentation in the `UniversalScrobbler/` directory
 
-Thank you for contributing!
+Thank you for contributing to macOS Scrobbler!

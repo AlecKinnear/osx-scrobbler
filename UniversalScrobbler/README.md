@@ -4,11 +4,31 @@ A native macOS music scrobbler application built with Swift and SwiftUI.
 
 ## Overview
 
-This is a complete Swift rewrite of the macOS Scrobbler, designed to be a native macOS menu bar application with proper UI configuration and modern Swift patterns.
+This is a native macOS menu bar application that scrobbles your music listening to Last.fm and ListenBrainz. Built with modern Swift patterns and SwiftUI, it provides a clean, native macOS experience with comprehensive configuration options.
+
+## Quick Start
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/swift-scrobbler.git
+   cd swift-scrobbler
+   ```
+
+2. Open `UniversalScrobbler.xcodeproj` in Xcode
+
+3. Build and run (⌘R)
+
+4. Configure Last.fm authentication:
+   - Get API credentials from https://www.last.fm/api/account/create
+   - Click the menu bar icon and go to Settings > Services
+   - Follow the authentication flow
+
+5. Start listening to music - your scrobbles will appear automatically!
 
 ## Features
 
 - **Native macOS Menu Bar App**: Runs in the menu bar with no dock icon
+- **User-Friendly Authentication**: Streamlined Last.fm OAuth flow with visual guidance
 - **Multi-Service Support**: Scrobbles to Last.fm and ListenBrainz
 - **Media Detection**: Monitors now playing from Music.app, Spotify, and other media players
 - **Metadata Enrichment**: Enhances track metadata using MusicBrainz API
@@ -16,6 +36,7 @@ This is a complete Swift rewrite of the macOS Scrobbler, designed to be a native
 - **Text Cleanup**: Configurable regex patterns to clean track metadata
 - **App Filtering**: Control which apps to scrobble from
 - **Love Tracks**: Support for loving tracks on Last.fm
+- **Light/Dark Mode**: Full support for macOS system appearance
 - **Settings UI**: Native SwiftUI settings window
 
 ## Requirements
@@ -196,6 +217,22 @@ This Swift implementation replaces the Rust version with:
 - [ ] Export scrobble history
 - [ ] Statistics and charts
 - [ ] App Store distribution (requires alternative to MediaRemote)
+- [ ] ListenBrainz authentication UI (similar to Last.fm)
+- [ ] Session key storage in Keychain
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
+
+### Development Setup
+
+1. Fork and clone the repository
+2. Open in Xcode 14.0 or later
+3. Make your changes
+4. Test thoroughly on macOS 13.0+
+5. Submit a pull request
+
+See [XCODE_SETUP.md](UniversalScrobbler/XCODE_SETUP.md) for detailed setup instructions.
 
 ## License
 
@@ -203,4 +240,4 @@ Same as the original Rust project.
 
 ## Credits
 
-Swift rewrite of the Universal Scrobbler by Alec Kinnear.
+Swift rewrite of the Universal Scrobbler.

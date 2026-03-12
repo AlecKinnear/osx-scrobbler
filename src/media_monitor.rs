@@ -95,7 +95,6 @@ pub struct MediaMonitor {
 impl MediaMonitor {
     pub fn new(scrobble_threshold: u8, text_cleaner: TextCleaner) -> Self {
         Self {
-            now_playing: NowPlayingJXA::new(Duration::from_secs(30)),
             // Initialize the JXA bridge with a zero-second cache.
             // This ensures that our own polling and retry logic is not affected by
             // a secondary cache layer within the `media-remote` crate.

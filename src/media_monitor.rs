@@ -11,6 +11,9 @@ use std::time::{Duration, Instant};
 
 const MIN_TRACK_DURATION: u64 = 30; // Minimum track duration in seconds to scrobble
 const SCROBBLE_TIME_THRESHOLD: u64 = 240; // 4 minutes in seconds
+/// Minimum elapsed time (seconds) required before we accept a snapshot from a *different* app.
+/// Avoids crediting a paused/background app that briefly "grabs" the system now-playing state.
+const MIN_ELAPSED_TO_SWITCH_APP: f64 = 1.0;
 
 /// Action to take based on app filtering
 #[derive(Debug, PartialEq)]
@@ -259,6 +262,16 @@ impl MediaMonitor {
                 info.bundle_id
             );
 
+            // Single source, must be playing: never start or switch to a session from a paused snapshot.
+            if !is_playing {
+                if let Some(session) = self.current_session.as_mut() {
+                    if session.bundle_id == info.bundle_id {
+                        session.update_from_snapshot(elapsed, false);
+                    }
+                }
+                return Ok(events);
+            }
+
             if let Some((track, scrobble_allowed)) = self.media_info_to_track(&info) {
                 let duration = track.duration.unwrap_or(0);
                 let bundle_id = info.bundle_id.clone();
@@ -276,6 +289,25 @@ impl MediaMonitor {
                         return Ok(events);
                     }
                     AppFilterAction::Allow => {}
+                }
+
+                // When switching to a different app, require progress so we don't credit a
+                // paused/background app that briefly grabbed the now-playing state.
+                if let Some(ref session) = self.current_session {
+                    if session.bundle_id != bundle_id {
+                        if elapsed < MIN_ELAPSED_TO_SWITCH_APP || duration < MIN_TRACK_DURATION {
+                            log::debug!(
+                                "Ignoring snapshot from {:?}: elapsed={:.0}s (need >= {:.0}s) or \
+                                 duration {}s (need >= {}s) when switching app",
+                                bundle_id,
+                                elapsed,
+                                MIN_ELAPSED_TO_SWITCH_APP,
+                                duration,
+                                MIN_TRACK_DURATION
+                            );
+                            return Ok(events);
+                        }
+                    }
                 }
 
                 // Check if this is a new track or continuation

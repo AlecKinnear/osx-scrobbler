@@ -319,6 +319,13 @@ If it shows up in your macOS Control Center or Lock Screen, it will work with OS
 2. **Test patterns** - Your regex patterns may have syntax errors (check logs for warnings)
 3. **Pattern order** - Patterns are applied in order; make sure they don't conflict
 
+### Wrong or mixed scrobbles (multiple services)
+
+The scrobbler uses macOS Now Playing and credits **one source at a time**—only the app that is **actively playing** and that the system reports as the current now-playing app. To avoid wrong or mixed scrobbles:
+
+- **Different apps (e.g. Yandex app + Safari):** Only the app that is actually playing is used; paused apps are ignored.
+- **Same app (e.g. several services in one browser or in WebCatalog/Electron):** The system does not tell us which tab or window is which—we only see one "now playing" stream per app. If you run multiple music services in the same browser (or same SSB app), **keep only one playing at a time**. Otherwise the system may flip between them and scrobbles can come from the wrong service.
+
 ## Configuration Reference
 
 ### Main Settings

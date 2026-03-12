@@ -10,6 +10,13 @@ pub enum AppChoice {
     Ignore,
 }
 
+/// User's choice when multiple sources are detected
+#[derive(Debug, PartialEq)]
+pub enum MultiSourceChoice {
+    Ok,
+    Suppress24h,
+}
+
 /// Show a native macOS alert asking the user whether to allow or ignore scrobbling from an app
 pub fn show_app_prompt(bundle_id: &str) -> AppChoice {
     // SAFETY: This function must be called from the main thread
@@ -56,3 +63,42 @@ pub fn show_app_prompt(bundle_id: &str) -> AppChoice {
         }
     }
 }
+
+/// Show a native macOS alert warning about multiple active music sources.
+/// Returns whether the user wants to suppress warnings for 24 hours.
+pub fn show_multiple_sources_warning() -> MultiSourceChoice {
+    // SAFETY: This function must be called from the main thread
+    let mtm = unsafe { MainThreadMarker::new_unchecked() };
+
+    unsafe {
+        let alert = NSAlert::new(mtm);
+        alert.setAlertStyle(NSAlertStyle::Informational);
+
+        let message = NSString::from_str("Multiple music sources detected");
+        alert.setMessageText(&message);
+
+        let info_text = NSString::from_str(
+            "More than one app is sending now-playing info.\n\
+             Scrobbling may be unreliable when multiple sources are active.\n\n\
+             OSX Scrobbler will only credit one source at a time.",
+        );
+        alert.setInformativeText(&info_text);
+
+        let ok_button = NSString::from_str("OK");
+        let suppress_button = NSString::from_str("Disable warnings for 24 hours");
+
+        alert.addButtonWithTitle(&ok_button);
+        alert.addButtonWithTitle(&suppress_button);
+
+        let response = alert.runModal();
+
+        if response == NSAlertFirstButtonReturn {
+            MultiSourceChoice::Ok
+        } else if response == NSAlertSecondButtonReturn {
+            MultiSourceChoice::Suppress24h
+        } else {
+            MultiSourceChoice::Ok
+        }
+    }
+}
+

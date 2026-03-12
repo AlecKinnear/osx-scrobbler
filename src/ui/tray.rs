@@ -43,6 +43,7 @@ pub struct TrayManager {
     state: TrayState,
     #[allow(dead_code)]
     menu: Menu,
+    album_art_item: MenuItem,
     now_playing_item: MenuItem,
     love_item: MenuItem,
     last_scrobble_item: MenuItem,
@@ -55,6 +56,10 @@ impl TrayManager {
         let state = TrayState::default();
 
         // Create menu items
+        // This item will eventually hold the album art image.
+        // For now, it's a non-interactive placeholder.
+        let album_art_item = MenuItem::new("", false, None);
+
         let now_playing_item = MenuItem::new("♩ Now Playing: None", false, None);
         let love_item = MenuItem::new("🤍 Love", false, None);
         let last_scrobble_item = MenuItem::new("♩ Last Scrobbled: None", false, None);
@@ -63,6 +68,8 @@ impl TrayManager {
 
         // Build menu
         let menu = Menu::new();
+        menu.append(&album_art_item)
+            .context("Failed to add album art item")?;
         menu.append(&now_playing_item)
             .context("Failed to add now playing item")?;
         menu.append(&love_item).context("Failed to add love item")?;
@@ -90,6 +97,7 @@ impl TrayManager {
             _tray_icon: tray_icon,
             state,
             menu,
+            album_art_item,
             now_playing_item,
             love_item,
             last_scrobble_item,
@@ -150,11 +158,19 @@ impl TrayManager {
     /// Update the album art URL for the currently playing track
     pub fn update_album_art(&mut self, url: Option<String>) -> Result<()> {
         self.state.album_art_url = url.clone();
-        if let Some(art_url) = url {
+        if let Some(ref art_url) = url {
             log::debug!("Updated tray album art URL: {}", art_url);
+            // TODO: In a future step, we will fetch the image from the URL,
+            // resize it, and set it as the icon for the `album_art_item`.
+            // For now, we just show a placeholder text.
+            self.album_art_item.set_text("🖼️ Album Art Available");
+            self.album_art_item.set_enabled(true);
         } else {
             log::debug!("Cleared tray album art URL");
+            self.album_art_item.set_text("");
+            self.album_art_item.set_enabled(false);
         }
+
         Ok(())
     }
 

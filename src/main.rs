@@ -261,6 +261,12 @@ fn main() -> Result<()> {
     const DEBOUNCE_DELAY: Duration = Duration::from_millis(250);
     let mut debounce_deadline: Option<Instant> = None;
 
+    // Tracking for multiple-source warnings (in-memory only).
+    let mut last_source_bundle: Option<String> = None;
+    let mut last_source_seen_at: Option<Instant> = None;
+    let mut last_multiple_source_warning_at: Option<Instant> = None;
+    let mut suppress_multiple_source_warnings_until: Option<Instant> = None;
+
     #[allow(deprecated)]
     event_loop.run(move |event, elwt| {
         // Handle user events (tray menu actions)
@@ -410,6 +416,54 @@ fn main() -> Result<()> {
 
                     if let Err(e) = tray.update_now_playing(Some(track_str)) {
                         log::error!("Failed to update tray now playing: {}", e);
+                    }
+
+                    // Detect when multiple apps are sending now-playing info and optionally warn.
+                    if let Some(ref bundle_id) = bundle_id {
+                        let now = Instant::now();
+
+                        if let Some(ref last_bundle) = last_source_bundle {
+                            if last_bundle != bundle_id {
+                                let recently_seen = last_source_seen_at
+                                    .map(|t| now.duration_since(t) <= Duration::from_secs(60))
+                                    .unwrap_or(false);
+                                let suppression_active = suppress_multiple_source_warnings_until
+                                    .map(|t| now <= t)
+                                    .unwrap_or(false);
+                                let recently_warned = last_multiple_source_warning_at
+                                    .map(|t| now.duration_since(t) <= Duration::from_secs(300))
+                                    .unwrap_or(false);
+
+                                if recently_seen && !suppression_active && !recently_warned {
+                                    log::warn!(
+                                        "Multiple sources detected: previously {:?}, now {:?}",
+                                        last_bundle,
+                                        bundle_id
+                                    );
+
+                                    use crate::ui::app_dialog::{
+                                        show_multiple_sources_warning, MultiSourceChoice,
+                                    };
+
+                                    match show_multiple_sources_warning() {
+                                        MultiSourceChoice::Ok => {
+                                            last_multiple_source_warning_at = Some(now);
+                                        }
+                                        MultiSourceChoice::Suppress24h => {
+                                            last_multiple_source_warning_at = Some(now);
+                                            suppress_multiple_source_warnings_until =
+                                                Some(now + Duration::from_secs(24 * 60 * 60));
+                                            log::info!(
+                                                "User disabled multiple-source warnings for 24 hours"
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        last_source_bundle = Some(bundle_id.clone());
+                        last_source_seen_at = Some(now);
                     }
 
                     // Display IDAGIO album art immediately

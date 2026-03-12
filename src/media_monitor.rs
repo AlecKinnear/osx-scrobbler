@@ -9,6 +9,10 @@ use chrono::{DateTime, Utc};
 use media_remote::prelude::*;
 use media_remote::NowPlayingInfo;
 use std::time::Duration;
+// #region agent log imports
+use std::fs::OpenOptions;
+use std::io::Write;
+// #endregion
 
 const MIN_TRACK_DURATION: u64 = 30; // Minimum track duration in seconds to scrobble
 const SCROBBLE_TIME_THRESHOLD: u64 = 240; // 4 minutes in seconds
@@ -92,11 +96,42 @@ impl MediaMonitor {
     pub fn new(scrobble_threshold: u8, text_cleaner: TextCleaner) -> Self {
         Self {
             now_playing: NowPlayingJXA::new(Duration::from_secs(30)),
+            // Initialize the JXA bridge with a zero-second cache.
+            // This ensures that our own polling and retry logic is not affected by
+            // a secondary cache layer within the `media-remote` crate.
+            now_playing: NowPlayingJXA::new(Duration::from_secs(0)),
             scrobble_threshold,
             current_session: None,
             text_cleaner,
         }
     }
+
+    // #region agent log helper
+    fn debug_agent_log(
+        hypothesis_id: &str,
+        location: &str,
+        message: &str,
+        data: serde_json::Value,
+        run_id: &str,
+    ) {
+        if let Ok(mut file) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/Users/alec/Documents/Github/osx-scrobbler/.cursor/debug-232aa8.log")
+        {
+            let payload = serde_json::json!({
+                "sessionId": "232aa8",
+                "runId": run_id,
+                "hypothesisId": hypothesis_id,
+                "location": location,
+                "message": message,
+                "data": data,
+                "timestamp": chrono::Utc::now().timestamp_millis(),
+            });
+            let _ = writeln!(file, "{}", payload.to_string());
+        }
+    }
+    // #endregion
 
     /// Check if an app should be scrobbled based on filtering config
     fn should_scrobble_app(
@@ -196,6 +231,22 @@ impl MediaMonitor {
         // If we detect a "playing" state without a title (or empty title), it's likely a transient state.
         // We'll retry a few times with a short delay to give the system time to catch up.
         if let Some(ref info) = media_info {
+            // #region agent log
+            Self::debug_agent_log(
+                "H1",
+                "media_monitor.rs:initial_info",
+                "Initial NowPlayingInfo snapshot",
+                serde_json::json!({
+                    "title": info.title,
+                    "artist": info.artist,
+                    "album": info.album,
+                    "duration": info.duration,
+                    "is_playing": info.is_playing,
+                    "bundle_id": info.bundle_id,
+                }),
+                "apple-music-pre-fix",
+            );
+            // #endregion
             let title_missing = info.title.as_ref().map(|t| t.trim().is_empty()).unwrap_or(true);
 
             if info.is_playing.unwrap_or(false) && title_missing {
@@ -207,6 +258,23 @@ impl MediaMonitor {
                         let new_title_ok = new_info.title.as_ref().map(|t| !t.trim().is_empty()).unwrap_or(false);
                         if new_title_ok {
                             log::info!("Successfully fetched metadata on retry #{}", i + 1);
+                            // #region agent log
+                            Self::debug_agent_log(
+                                "H2",
+                                "media_monitor.rs:retry_success",
+                                "Metadata filled in after retry",
+                                serde_json::json!({
+                                    "retry": i + 1,
+                                    "title": new_info.title,
+                                    "artist": new_info.artist,
+                                    "album": new_info.album,
+                                    "duration": new_info.duration,
+                                    "is_playing": new_info.is_playing,
+                                    "bundle_id": new_info.bundle_id,
+                                }),
+                                "apple-music-pre-fix",
+                            );
+                            // #endregion
                             media_info = new_info_opt;
                             break;
                         }

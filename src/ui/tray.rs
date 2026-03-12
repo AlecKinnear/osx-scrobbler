@@ -6,19 +6,16 @@ use tray_icon::{
     Icon, TrayIcon, TrayIconBuilder,
 };
 
-/// Load the menu bar icon (32x32 for retina 2x display)
-/// Icon is embedded at compile time from the universal scrobbler iconset
+/// Load the menu bar icon (32x32 for retina 2x display).
+/// Icon is embedded at compile time from the universal scrobbler iconset.
 fn create_icon() -> Result<Icon> {
-    // Icon is embedded at compile time
     let icon_data = include_bytes!("../../resources/universalescrobbler.iconset/icon_32.png");
 
     log::info!("Loading embedded menu bar icon (32x32)");
 
-    // Parse the PNG data and create an Icon
     let reader = image::ImageReader::new(std::io::Cursor::new(icon_data))
         .with_guessed_format()
         .context("Failed to detect icon format")?;
-
     let image = reader.decode().context("Failed to decode icon image")?;
     let rgba_image = image.to_rgba8();
     let (width, height) = rgba_image.dimensions();

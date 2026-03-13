@@ -55,6 +55,9 @@ regex = "1.10"
 # Static lazy initialization for caching
 lazy_static = "1.4"
 
+# Async runtime for background tasks
+tokio = { version = "1", features = ["full"] }
+
 # System tray and menu bar
 tray-icon = "0.19"
 winit = "0.30"

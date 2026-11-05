@@ -92,14 +92,15 @@ export default function Header() {
     <header className={`sticky top-0 z-50 transition-all duration-300 ${scrolled ? 'bg-white shadow-md' : 'bg-white'}`}>
       <div>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-20">
-            {/* Normal mode: logo + nav */}
+          <div className="flex items-center justify-between h-20 gap-8">
+            {/* Logo always visible */}
+            <Link to="/" className="group transition-transform group-hover:scale-[1.02] origin-left flex-shrink-0">
+              <Logo />
+            </Link>
+
+            {/* Nav or search on the right */}
             {!searchOpen && (
               <>
-                <Link to="/" className="group transition-transform group-hover:scale-[1.02] origin-left">
-                  <Logo />
-                </Link>
-
                 <nav className="hidden lg:flex items-center gap-6">
                   {categories.map((cat) => (
                     <Link
@@ -147,20 +148,17 @@ export default function Header() {
               </>
             )}
 
-            {/* Search mode: replaces entire header content */}
+            {/* Search mode: appears in the nav space, not over the logo */}
             {searchOpen && (
-              <div ref={searchContainerRef} className="w-full flex items-center gap-3">
-                <Link to="/" onClick={closeSearch} className="flex-shrink-0">
-                  <SearchIcon className="w-5 h-5 text-primary-700" />
-                </Link>
-                <form onSubmit={handleSubmitSearch} className="flex-1 relative">
+              <div ref={searchContainerRef} className="flex-1 flex items-center justify-end gap-3">
+                <form onSubmit={handleSubmitSearch} className="relative w-full max-w-md">
                   <input
                     ref={searchInputRef}
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search articles…"
-                    className="w-full text-base font-sans text-neutral-800 bg-transparent border-b border-neutral-300 focus:border-neutral-400 outline-none py-2 pr-8 placeholder:text-neutral-300 transition-colors"
+                    className="w-full text-base font-sans text-neutral-800 bg-transparent border-b border-neutral-300 focus:border-neutral-400 outline-none py-2 pr-8 placeholder:text-neutral-300 transition-colors text-right"
                   />
                   {searchQuery && (
                     <button
@@ -178,7 +176,7 @@ export default function Header() {
 
                   {/* Live results dropdown */}
                   {(searchResults.length > 0 || (searchLoading && searchQuery.trim())) && (
-                    <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-2xl border border-neutral-100 overflow-hidden z-50">
+                    <div className="absolute top-full right-0 mt-2 bg-white rounded-xl shadow-2xl border border-neutral-100 overflow-hidden z-50 w-96 max-w-[calc(100vw-2rem)]">
                       {searchLoading && (
                         <div className="px-5 py-4 text-sm text-neutral-400">Searching…</div>
                       )}

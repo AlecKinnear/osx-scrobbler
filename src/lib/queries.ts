@@ -161,6 +161,25 @@ export async function fetchCategoryBySlug(slug: string): Promise<Category | null
   return data as Category | null
 }
 
+export async function searchArticles(query: string, limit: number = 8): Promise<Article[]> {
+  const term = query.trim()
+  if (!term) return []
+
+  const { data, error } = await supabase
+    .from('articles')
+    .select(`
+      *,
+      category:categories(*),
+      author:authors(*)
+    `)
+    .or(`title.ilike.%${term}%,excerpt.ilike.%${term}%`)
+    .order('published_at', { ascending: false })
+    .limit(limit)
+
+  if (error) throw error
+  return data as unknown as Article[]
+}
+
 export async function subscribeNewsletter(email: string): Promise<{ error: string | null }> {
   const { error } = await supabase
     .from('newsletter_subscribers')

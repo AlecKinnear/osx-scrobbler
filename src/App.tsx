@@ -5,6 +5,7 @@ import ArticlePage from './pages/ArticlePage'
 import CategoryPage from './pages/CategoryPage'
 import AuthorPage from './pages/AuthorPage'
 import AboutPage from './pages/AboutPage'
+import SearchPage from './pages/SearchPage'
 import NotFoundPage from './pages/NotFoundPage'
 
 export default function App() {
@@ -16,6 +17,7 @@ export default function App() {
         <Route path="/category/:slug" element={<CategoryPage />} />
         <Route path="/author/:slug" element={<AuthorPage />} />
         <Route path="/about" element={<AboutPage />} />
+        <Route path="/search" element={<SearchPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </Layout>

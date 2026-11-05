@@ -93,11 +93,9 @@ export default function Header() {
       <div>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-20 gap-8">
-            {!searchOpen && (
-              <Link to="/" className="group transition-transform group-hover:scale-[1.02] origin-left flex-shrink-0">
-                <Logo />
-              </Link>
-            )}
+            <Link to="/" className="group transition-transform group-hover:scale-[1.02] origin-left flex-shrink-0">
+              <Logo />
+            </Link>
 
             {/* Nav or search on the right */}
             {!searchOpen && (
@@ -151,7 +149,7 @@ export default function Header() {
 
             {/* Search mode: appears in the nav space, not over the logo */}
             {searchOpen && (
-              <div ref={searchContainerRef} className="w-[640px] max-w-full flex items-center gap-3">
+              <div ref={searchContainerRef} className="w-[640px] max-w-full flex-shrink-0 flex items-center gap-3">
                 <form onSubmit={handleSubmitSearch} className="relative flex-1">
                   <input
                     ref={searchInputRef}

@@ -150,15 +150,15 @@ export default function Header() {
 
             {/* Search mode: appears in the nav space, not over the logo */}
             {searchOpen && (
-              <div ref={searchContainerRef} className="flex-1 flex items-center justify-end gap-3">
-                <form onSubmit={handleSubmitSearch} className="relative w-full max-w-md">
+              <div ref={searchContainerRef} className="flex-1 flex items-center gap-3">
+                <form onSubmit={handleSubmitSearch} className="relative flex-1">
                   <input
                     ref={searchInputRef}
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search articles…"
-                    className="w-full text-base font-sans text-neutral-800 bg-transparent border-b border-neutral-300 focus:border-neutral-400 outline-none py-2 pr-8 placeholder:text-neutral-300 transition-colors text-right"
+                    className="w-full text-base font-sans text-neutral-800 bg-transparent border-b border-neutral-300 focus:border-neutral-400 outline-none py-2 pr-8 placeholder:text-neutral-300 transition-colors text-left"
                   />
                   {searchQuery && (
                     <button
@@ -176,7 +176,7 @@ export default function Header() {
 
                   {/* Live results dropdown */}
                   {(searchResults.length > 0 || (searchLoading && searchQuery.trim())) && (
-                    <div className="absolute top-full right-0 mt-2 bg-white rounded-xl shadow-2xl border border-neutral-100 overflow-hidden z-50 w-96 max-w-[calc(100vw-2rem)]">
+                    <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-2xl border border-neutral-100 overflow-hidden z-50">
                       {searchLoading && (
                         <div className="px-5 py-4 text-sm text-neutral-400">Searching…</div>
                       )}

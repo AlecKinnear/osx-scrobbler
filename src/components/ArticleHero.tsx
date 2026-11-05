@@ -22,7 +22,7 @@ export default function ArticleHero({ article }: { article: Article }) {
             {article.category && (
               <span
                 className="category-pill mb-4 bg-white/90 backdrop-blur-sm"
-                style={{ color: article.category.color || '#38704f', backgroundColor: `${article.category.color}20` }}
+                style={{ color: article.category.color || '#1f4579', backgroundColor: `${article.category.color}20` }}
               >
                 {article.category.name}
               </span>

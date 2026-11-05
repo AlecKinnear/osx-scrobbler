@@ -86,7 +86,7 @@ export default function HomePage() {
                   <span className="text-primary-200">$22,622 raised</span>
                   <span className="text-primary-200">Goal: $30,000</span>
                 </div>
-                <div className="h-2 bg-primary-950 rounded-full overflow-hidden">
+                <div className="h-2 bg-primary-900 rounded-full overflow-hidden">
                   <div className="h-full bg-accent-400 rounded-full" style={{ width: '75.4%' }} />
                 </div>
               </div>
@@ -108,7 +108,7 @@ export default function HomePage() {
             </div>
 
             {/* Newsletter */}
-            <div className="bg-neutral-900 rounded-2xl p-6 text-white">
+            <div className="bg-ink-900 rounded-2xl p-6 text-white">
               <h3 className="text-lg font-serif font-bold mb-1">Newsletter</h3>
               <p className="text-sm text-neutral-300 mb-4">
                 Sharp analysis delivered to your inbox every day.

@@ -3,7 +3,7 @@ import type { Article } from '../types'
 import { formatDateShort } from '../lib/utils'
 
 export function categoryColor(article: Article): string {
-  if (!article.category?.color) return '#38704f'
+  if (!article.category?.color) return '#1f4579'
   return article.category.color
 }
 
@@ -13,8 +13,8 @@ export function categoryBgClass(article: Article): string {
 
 export function categoryStyle(article: Article): React.CSSProperties {
   return {
-    backgroundColor: article.category?.color ? `${article.category.color}20` : '#e3ede8',
-    color: article.category?.color || '#38704f',
+    backgroundColor: article.category?.color ? `${article.category.color}20` : '#dde8f5',
+    color: article.category?.color || '#1f4579',
   }
 }
 
@@ -33,7 +33,7 @@ export default function ArticleCard({ article, variant = 'default' }: { article:
           )}
           <div className="min-w-0">
             {article.category && (
-              <span className="text-[10px] font-sans font-semibold uppercase tracking-wider" style={{ color: article.category.color || '#38704f' }}>
+              <span className="text-[10px] font-sans font-semibold uppercase tracking-wider" style={{ color: article.category.color || '#1f4579' }}>
                 {article.category.name}
               </span>
             )}

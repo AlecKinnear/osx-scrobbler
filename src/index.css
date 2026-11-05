@@ -22,11 +22,11 @@
   }
 
   .article-body a {
-    @apply text-primary-700 underline underline-offset-2 hover:text-primary-800;
+    @apply text-primary-600 underline underline-offset-2 hover:text-primary-700;
   }
 
   .article-body blockquote {
-    @apply border-l-4 border-primary-300 pl-6 my-6 italic text-neutral-600;
+    @apply border-l-4 border-accent-400 pl-6 my-6 italic text-neutral-600;
   }
 
   .article-body img {

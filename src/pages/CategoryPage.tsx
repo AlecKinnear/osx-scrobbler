@@ -49,11 +49,11 @@ export default function CategoryPage() {
         className="py-16"
         style={{
           backgroundColor: category.color ? `${category.color}10` : '#f5f8f6',
-          borderBottom: `3px solid ${category.color || '#38704f'}`,
+          borderBottom: `3px solid ${category.color || '#1f4579'}`,
         }}
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-serif font-bold" style={{ color: category.color || '#38704f' }}>
+          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-serif font-bold" style={{ color: category.color || '#1f4579' }}>
             {category.name}
           </h1>
           {category.description && (

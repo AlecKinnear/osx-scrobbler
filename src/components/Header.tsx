@@ -22,14 +22,9 @@ export default function Header() {
       <div className="border-b border-neutral-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-6">
-              <Link to="/" className="flex items-center gap-2 group">
-                <Logo className="h-9 w-9 transition-transform group-hover:scale-105" />
-                <span className="hidden sm:block text-sm text-neutral-500 font-sans leading-tight max-w-[200px]">
-                  Thoughts on the Middle East,<br />History and Religion
-                </span>
-              </Link>
-            </div>
+            <Link to="/" className="group transition-transform group-hover:scale-[1.02] origin-left">
+              <Logo />
+            </Link>
 
             <nav className="hidden lg:flex items-center gap-6">
               {categories.map((cat) => (

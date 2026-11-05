@@ -4,16 +4,12 @@ import NewsletterSignup from './NewsletterSignup'
 
 export default function Footer() {
   return (
-    <footer className="bg-neutral-900 text-neutral-300 mt-20">
+    <footer className="bg-ink-900 text-neutral-300 mt-20">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
           <div>
-            <div className="flex items-center gap-3 mb-4">
-              <Logo className="h-10 w-10" />
-              <div>
-                <div className="text-lg font-serif text-white font-bold">Informed Comment</div>
-                <div className="text-xs text-neutral-400">Thoughts on the Middle East, History and Religion</div>
-              </div>
+            <div className="mb-4 bg-white rounded-lg px-3 py-2 inline-block">
+              <Logo />
             </div>
             <p className="text-sm text-neutral-400 leading-relaxed max-w-xs">
               Shedding light on how war, climate change and globalization are shaping our world.

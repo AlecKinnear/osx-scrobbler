@@ -53,7 +53,7 @@ export default function AboutPage() {
           </div>
         </div>
 
-        <div className="mt-12 p-8 bg-neutral-900 rounded-2xl text-white text-center">
+        <div className="mt-12 p-8 bg-ink-900 rounded-2xl text-white text-center">
           <h3 className="text-xl font-serif font-bold mb-2">Join Our Newsletter</h3>
           <p className="text-sm text-neutral-300 mb-4">Sharp analysis delivered to your inbox every day.</p>
           <div className="max-w-md mx-auto">

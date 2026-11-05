@@ -150,8 +150,8 @@ export default function Header() {
 
             {/* Search mode: appears in the nav space, not over the logo */}
             {searchOpen && (
-              <div ref={searchContainerRef} className="flex-1 flex items-center gap-3">
-                <form onSubmit={handleSubmitSearch} className="relative flex-1">
+              <div ref={searchContainerRef} className="flex-1 flex items-center justify-end gap-3">
+                <form onSubmit={handleSubmitSearch} className="relative flex-1 max-w-[calc(100%-30px)]">
                   <input
                     ref={searchInputRef}
                     type="text"

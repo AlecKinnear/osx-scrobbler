@@ -7,7 +7,7 @@ export default function ArticleHero({ article }: { article: Article }) {
   return (
     <article className="relative">
       <Link to={`/article/${article.slug}`} className="group block">
-        <div className="relative aspect-[21/9] sm:aspect-[2/1] lg:aspect-[5/2] overflow-hidden rounded-2xl">
+        <div className="relative aspect-[21/9] sm:aspect-[2/1] lg:aspect-[5/2] overflow-hidden rounded-xl">
           {article.hero_image_url ? (
             <img
               src={article.hero_image_url}

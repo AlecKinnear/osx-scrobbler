@@ -27,7 +27,7 @@ export default function ArticleCard({ article, variant = 'default' }: { article:
             <img
               src={article.hero_image_url}
               alt={article.title}
-              className="w-20 h-20 object-cover rounded-lg flex-shrink-0"
+              className="w-20 h-20 object-cover rounded-md flex-shrink-0"
               loading="lazy"
             />
           )}
@@ -55,7 +55,7 @@ export default function ArticleCard({ article, variant = 'default' }: { article:
             <img
               src={article.hero_image_url}
               alt={article.title}
-              className="w-full sm:w-64 h-48 sm:h-40 object-cover rounded-xl flex-shrink-0"
+              className="w-full sm:w-64 h-48 sm:h-40 object-cover rounded-lg flex-shrink-0"
               loading="lazy"
             />
           )}
@@ -90,7 +90,7 @@ export default function ArticleCard({ article, variant = 'default' }: { article:
   return (
     <Link to={`/article/${article.slug}`} className="group block">
       {article.hero_image_url && (
-        <div className="aspect-[16/10] overflow-hidden rounded-xl mb-4">
+        <div className="aspect-[16/10] overflow-hidden rounded-lg mb-4">
           <img
             src={article.hero_image_url}
             alt={article.title}

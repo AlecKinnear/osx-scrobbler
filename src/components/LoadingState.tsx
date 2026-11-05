@@ -5,7 +5,7 @@ export default function LoadingState() {
         <div className="h-8 w-64 bg-neutral-200 rounded mb-8" />
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-6">
-            <div className="aspect-[2/1] bg-neutral-200 rounded-2xl" />
+            <div className="aspect-[2/1] bg-neutral-200 rounded-xl" />
             <div className="h-6 w-3/4 bg-neutral-200 rounded" />
             <div className="h-6 w-1/2 bg-neutral-200 rounded" />
             <div className="space-y-3">

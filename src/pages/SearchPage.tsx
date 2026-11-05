@@ -49,7 +49,7 @@ export default function SearchPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+    <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
       <div className="mb-10">
         <form onSubmit={handleSubmit}>
           <div className="relative">
@@ -59,7 +59,7 @@ export default function SearchPage() {
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               placeholder="Search articles…"
-              className="w-full text-2xl sm:text-3xl font-serif text-neutral-800 bg-transparent border-b-2 border-neutral-300 focus:border-primary-700 outline-none py-3 pr-12 transition-colors placeholder:text-neutral-300"
+              className="w-full text-lg font-sans text-neutral-800 bg-transparent border-b border-neutral-300 focus:border-neutral-400 outline-none py-3 pr-12 transition-colors placeholder:text-neutral-300"
             />
             <button
               type="submit"

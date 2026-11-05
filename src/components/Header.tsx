@@ -90,7 +90,7 @@ export default function Header() {
 
   return (
     <header className={`sticky top-0 z-50 transition-all duration-300 ${scrolled ? 'bg-white shadow-md' : 'bg-white'}`}>
-      <div className="border-b border-neutral-200">
+      <div>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-20">
             {/* Normal mode: logo + nav */}
@@ -149,9 +149,9 @@ export default function Header() {
 
             {/* Search mode: replaces entire header content */}
             {searchOpen && (
-              <div ref={searchContainerRef} className="w-full flex items-center gap-4">
+              <div ref={searchContainerRef} className="w-full flex items-center gap-3">
                 <Link to="/" onClick={closeSearch} className="flex-shrink-0">
-                  <SearchIcon className="w-6 h-6 text-primary-700" />
+                  <SearchIcon className="w-5 h-5 text-primary-700" />
                 </Link>
                 <form onSubmit={handleSubmitSearch} className="flex-1 relative">
                   <input
@@ -160,7 +160,7 @@ export default function Header() {
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search articles…"
-                    className="w-full text-xl sm:text-2xl font-serif text-neutral-800 bg-transparent border-b-2 border-primary-700 outline-none py-2 pr-10 placeholder:text-neutral-300 transition-colors"
+                    className="w-full text-base font-sans text-neutral-800 bg-transparent border-b border-neutral-300 focus:border-neutral-400 outline-none py-2 pr-8 placeholder:text-neutral-300 transition-colors"
                   />
                   {searchQuery && (
                     <button
@@ -172,7 +172,7 @@ export default function Header() {
                       className="absolute right-0 top-1/2 -translate-y-1/2 text-neutral-300 hover:text-neutral-500 transition-colors p-1"
                       aria-label="Clear"
                     >
-                      <CloseIcon className="w-5 h-5" />
+                      <CloseIcon className="w-4 h-4" />
                     </button>
                   )}
 
@@ -233,7 +233,7 @@ export default function Header() {
                   className="flex-shrink-0 p-2 rounded-md text-neutral-500 hover:bg-neutral-100 transition-colors"
                   aria-label="Close search"
                 >
-                  <CloseIcon className="w-6 h-6" />
+                  <CloseIcon className="w-5 h-5" />
                 </button>
               </div>
             )}
@@ -243,7 +243,7 @@ export default function Header() {
 
       {/* Mobile menu (only in normal mode) */}
       {!searchOpen && menuOpen && (
-        <div className="lg:hidden border-b border-neutral-200 bg-white">
+        <div className="lg:hidden bg-white">
           <nav className="px-4 py-3 space-y-2">
             {categories.map((cat) => (
               <Link

@@ -71,7 +71,7 @@ export default function HomePage() {
               <div className="flex items-center justify-between mb-4">
                 <Link
                   to={`/category/${category.slug}`}
-                  className="text-sm font-sans font-bold uppercase tracking-wider hover:opacity-70 transition-opacity"
+                  className="text-base font-sans font-bold uppercase tracking-wider hover:opacity-70 transition-opacity"
                   style={{ color: category.color || '#1f4579' }}
                 >
                   {category.name}

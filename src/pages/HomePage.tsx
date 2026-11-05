@@ -65,13 +65,13 @@ export default function HomePage() {
 
       {/* Category sections — 3 across grid, ordered by latest story per category */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-12">
-        <div className="space-y-16">
+        <div className="space-y-12">
           {groups.map(({ category, articles }) => (
             <div key={category.id}>
-              <div className="flex items-center justify-between mb-6 pb-3 border-b border-neutral-200">
+              <div className="flex items-center justify-between mb-4">
                 <Link
                   to={`/category/${category.slug}`}
-                  className="text-xl font-serif font-bold text-ink-800 hover:text-primary-700 transition-colors"
+                  className="text-sm font-sans font-bold uppercase tracking-wider hover:opacity-70 transition-opacity"
                   style={{ color: category.color || '#1f4579' }}
                 >
                   {category.name}

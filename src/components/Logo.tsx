@@ -23,10 +23,10 @@ export default function Logo({ className = '' }: { className?: string }) {
     <div className={`flex items-center gap-2.5 ${className}`}>
       <LogoMark className="h-12 w-auto flex-shrink-0" />
       <div className="leading-none">
-        <div className="font-sans font-bold text-ink-800 text-sm uppercase tracking-wider">
+        <div className="font-sans font-bold text-ink-800 text-base uppercase tracking-wider">
           Informed Comment
         </div>
-        <div className="text-[10px] text-neutral-500 font-sans mt-1 tracking-normal">
+        <div className="text-[11px] text-neutral-500 font-sans mt-1 tracking-normal">
           Thoughts on the Middle East, History and Religion
         </div>
       </div>

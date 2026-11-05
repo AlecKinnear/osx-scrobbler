@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-white text-neutral-800 font-sans antialiased;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-serif;
+  }
+}
+
+@layer components {
+  .article-body {
+    @apply text-lg leading-relaxed text-neutral-700;
+  }
+
+  .article-body p {
+    @apply mb-6;
+  }
+
+  .article-body a {
+    @apply text-primary-700 underline underline-offset-2 hover:text-primary-800;
+  }
+
+  .article-body blockquote {
+    @apply border-l-4 border-primary-300 pl-6 my-6 italic text-neutral-600;
+  }
+
+  .article-body img {
+    @apply rounded-lg my-6 w-full;
+  }
+
+  .article-body h2 {
+    @apply text-2xl font-bold mt-10 mb-4 text-neutral-900;
+  }
+
+  .article-body h3 {
+    @apply text-xl font-bold mt-8 mb-3 text-neutral-900;
+  }
+
+  .article-body ul {
+    @apply list-disc pl-6 mb-6 space-y-2;
+  }
+
+  .article-body ol {
+    @apply list-decimal pl-6 mb-6 space-y-2;
+  }
+
+  .article-body strong {
+    @apply font-semibold text-neutral-900;
+  }
+
+  .category-pill {
+    @apply inline-block text-xs font-sans font-semibold uppercase tracking-wider px-3 py-1 rounded-full;
+  }
+}
+
+.prose-article {
+  max-width: 720px;
+}

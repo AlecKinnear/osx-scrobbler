@@ -30,7 +30,7 @@
   }
 
   .article-body img {
-    @apply rounded-md my-6 w-full;
+    @apply rounded-[3px] my-6 w-full;
   }
 
   .article-body h2 {

@@ -80,6 +80,45 @@ export async function fetchArticlesByCategory(categorySlug: string, limit: numbe
   return data as unknown as Article[]
 }
 
+export async function fetchArticlesGroupedByCategory(perCategory: number = 3, excludeId?: string): Promise<{ category: Category; articles: Article[] }[]> {
+  const { data: categories, error: catError } = await supabase
+    .from('categories')
+    .select('*')
+  if (catError) throw catError
+  if (!categories || categories.length === 0) return []
+
+  const groups: { category: Category; articles: Article[] }[] = []
+
+  for (const cat of categories) {
+    let query = supabase
+      .from('articles')
+      .select(`
+        *,
+        category:categories(*),
+        author:authors(*)
+      `)
+      .eq('category_id', cat.id)
+      .order('published_at', { ascending: false })
+      .limit(perCategory)
+    if (excludeId) {
+      query = query.neq('id', excludeId)
+    }
+    const { data, error } = await query
+    if (error) throw error
+    if (data && data.length > 0) {
+      groups.push({ category: cat, articles: data as unknown as Article[] })
+    }
+  }
+
+  groups.sort((a, b) => {
+    const aDate = a.articles[0]?.published_at || ''
+    const bDate = b.articles[0]?.published_at || ''
+    return bDate.localeCompare(aDate)
+  })
+
+  return groups
+}
+
 export async function fetchArticlesByAuthor(authorSlug: string, limit: number = 20): Promise<Article[]> {
   const { data: authData } = await supabase
     .from('authors')
